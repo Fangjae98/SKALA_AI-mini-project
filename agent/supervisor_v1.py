@@ -7,6 +7,7 @@
 from langsmith import traceable
 
 from .deps import SupervisorDeps
+from .equipment import DEFAULT_EQUIPMENT, format_metrics
 from .retry import with_retry
 
 
@@ -16,11 +17,12 @@ async def run_v1(deps: SupervisorDeps, query: str, thread_id: str,
     events = [{"type": "Legacy", "note": "v1: 라우팅/게이트/재계획/검증 없음"}]
     # 이름 기억 같은 단순 대화도, 장애 진단도 전부 같은 선형 경로를 탄다.
     reply, usage = await deps.fast_llm.chat(query, history)
-    if "도와드릴까요" in reply and ("장애" in query or "진단" in query):
+    # [Base 대비 변경] 항상 auth-service를 조회하던 자리 → 항상 연계점(pcc-01)을 조회
+    if "도와드릴까요" in reply and ("이상" in query or "진단" in query):
         data, retries = await with_retry(
-            deps.mcp.call_tool, "get_monitoring_status", {"system_name": "auth-service"})
-        reply = (f"{data['system_name']} 상태={data['status']}, "
-                 f"CPU {data['cpu_percent']}% 입니다. 자세한 절차는 담당자에게 문의하세요.")
+            deps.mcp.call_tool, "get_equipment_status", {"equipment_id": DEFAULT_EQUIPMENT})
+        reply = (f"{data['equipment_id']} 상태={data['status']}, "
+                 f"{format_metrics(data.get('metrics', {}))} 입니다. 자세한 절차는 담당자에게 문의하세요.")
         events.append({"type": "TaskCompleted", "source": "monitoring",
                        "retries": retries})
     events.append({"type": "Finalize", "pipeline": "legacy-v1"})

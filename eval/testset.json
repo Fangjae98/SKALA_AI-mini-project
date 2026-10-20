@@ -1,0 +1,22 @@
+[
+  {"id": 1, "query": "태양광 2호기 발전량이 평소보다 너무 낮아요, 원인 확인해주세요",
+   "expected_route": "incident", "expected_runbook": "pv-underperform", "expected_targets": ["pv-02"]},
+  {"id": 2, "query": "출력제어 지시가 들어왔는데 어떻게 대응해야 하나요?",
+   "expected_route": "incident", "expected_runbook": "curtailment", "expected_targets": ["pv-01", "pv-02"]},
+  {"id": 3, "query": "변압기 쪽 전압이 높다는 경보가 떴어요",
+   "expected_route": "incident", "expected_runbook": "voltage-rise", "expected_targets": ["tr-01"]},
+  {"id": 4, "query": "오늘 오전 피크가 계약전력에 거의 닿았어요. 원인 분석해줘",
+   "expected_route": "incident", "expected_runbook": "peak-demand", "expected_targets": ["pcc-01"]},
+  {"id": 5, "query": "ESS 1호기 온도가 계속 올라가요",
+   "expected_route": "incident", "expected_runbook": "ess-overheat", "expected_targets": ["ess-01"]},
+  {"id": 6, "query": "ESS 1호기 충전율이 80%를 넘었는데 괜찮나요?",
+   "expected_route": "incident", "expected_runbook": "ess-soc-limit", "expected_targets": ["ess-01"]},
+  {"id": 7, "query": "ESS 2호기가 거의 방전됐어요",
+   "expected_route": "incident", "expected_runbook": "ess-soc-low", "expected_targets": ["ess-02"]},
+  {"id": 8, "query": "DR 감축 요청이 왔어요, 어떻게 대응하죠?",
+   "expected_route": "incident", "expected_runbook": "dr-event", "expected_targets": ["pcc-01"]},
+  {"id": 9, "query": "EV 충전기 데이터가 안 들어오는 것 같아요",
+   "expected_route": "incident", "expected_runbook": "comm-loss", "expected_targets": ["evc-01"]},
+  {"id": 10, "query": "안녕, 너는 뭘 할 수 있어?",
+   "expected_route": "chat", "expected_runbook": null, "expected_targets": []}
+]

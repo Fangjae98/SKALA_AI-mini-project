@@ -1,14 +1,23 @@
-# 회귀 테스트용 쿼리 목록 — 시스템명 하드코딩 수정 검증
+# 회귀 테스트 질문 목록 — Before/After 비교용
 
-| # | 쿼리 | 테스트 목적 |
-|---|---|---|
-| 1 | payments-service 결제 응답이 느려지고 CPU가 치솟았어요, 원인 확인해주세요 | 기존엔 auth-service로 조용히 되돌아갔던 4개 시스템 중 하나 — KNOWN_SYSTEMS 인식 확인 (cpu-spike runbook) |
-| 2 | cache-service 메모리 사용률이 계속 올라가고 있어요 | 미인식 시스템 확인 2 (memory-leak runbook) |
-| 3 | log-service 디스크 공간이 부족하다는 알림이 왔어요 | 미인식 시스템 확인 3 (disk-full runbook) |
-| 4 | gateway-service에서 payments-service로 가는 요청이 타임아웃 나고 있어요 | 두 시스템 동시 언급 — system_name은 먼저 등장한 gateway-service 하나만 뽑히는지, 그런데도 research task는 두 시스템 다 조사하는지(비교 분석 영향 없음) 확인 |
-| 5 | web-01 CPU 급증, auth-service 커넥션 풀도 같이 확인해줘 | 기본 2개 시스템 동시 언급 — 기존 동작(web-01, auth-service 둘 다 조사) 회귀 확인 |
-| 6 | payments-service랑 cache-service 둘 다 저하됐는데 공통 원인이 있는지 분석해줘 | needs_analysis=true 유도 — gate(W6)·analysis_node 비교 분석이 여전히 동작하는지 확인 |
-| 7 | 로그인 응답이 느려요, 원인 확인해주세요 | 시스템명 미언급 — auth-service 폴백 확인 |
-| 8 | billing-service 응답이 느려요 | 목록에 없는 시스템명 — system_name 라벨은 auth-service 폴백, plan()의 target 클램프도 정상 동작하는지(KNOWN_SYSTEMS에 없는 임의 이름은 여전히 걸러져야 함) |
-| 9 | 안녕, 너는 누구야? | route=chat 직행(Wave 5) — 토큰 스트리밍(AnswerToken)이 채팅 경로에서도 실시간으로 오는지 확인 |
-| 10 | 제 이름은 민수입니다 → (다음 메시지로) 제 이름이 뭐였죠? | Wave 12 세션 기억 — 서버 재시작 후에도 유지되는지, 스트리밍과 충돌 없는지 확인 |
+`eval/testset.json`과 같은 내용이다. `python3 eval/run_regression.py --label <이름>`으로 실행한다.
+
+| # | 질문 | 정답 판단 | 정답 매뉴얼 | 조사해야 할 설비 | 테스트 목적 |
+|---|---|---|---|---|---|
+| 1 | 태양광 2호기 발전량이 평소보다 너무 낮아요, 원인 확인해주세요 | incident | pv-underperform | pv-02 | 한국어 별칭(태양광 2호기 → pv-02) 인식, 생산 단계 |
+| 2 | 출력제어 지시가 들어왔는데 어떻게 대응해야 하나요? | incident | curtailment | pv-01, pv-02 | 설비 이름 없이 묶음 별칭(출력제어 → 태양광 전체) 인식 |
+| 3 | 변압기 쪽 전압이 높다는 경보가 떴어요 | incident | voltage-rise | tr-01 | 이동 단계 |
+| 4 | 오늘 오전 피크가 계약전력에 거의 닿았어요. 원인 분석해줘 | incident | peak-demand | pcc-01 | 이동 단계, 연계점 |
+| 5 | ESS 1호기 온도가 계속 올라가요 | incident | ess-overheat | ess-01 | **알람 2개(충전 상한·과열) 중 안전 이슈를 고르는지** |
+| 6 | ESS 1호기 충전율이 80%를 넘었는데 괜찮나요? | incident | ess-soc-limit | ess-01 | 저장 단계, 같은 설비에서 질문 의도에 맞는 매뉴얼 선택 |
+| 7 | ESS 2호기가 거의 방전됐어요 | incident | ess-soc-low | ess-02 | 공급 단계 |
+| 8 | DR 감축 요청이 왔어요, 어떻게 대응하죠? | incident | dr-event | pcc-01 | **연계점 알람 3개(피크·역송·DR) 중 질문에 맞는 것을 고르는지** |
+| 9 | EV 충전기 데이터가 안 들어오는 것 같아요 | incident | comm-loss | evc-01 | 수집(데이터) 층 |
+| 10 | 안녕, 너는 뭘 할 수 있어? | chat | (없음) | (없음) | 잡담은 무거운 파이프라인을 타지 않는지 |
+
+## Before 결과 (fake 백엔드, 2026-10-20)
+
+- 판단 정확도 10/10, **매뉴얼 정답률 7/9**, 평균 0.72초, 평균 도구 호출 2.8회, 평균 검수 시도 1.8회
+- 틀린 문항: 5번(ess-overheat 대신 ess-soc-limit), 8번(dr-event 대신 peak-demand)
+- 원인: 매뉴얼을 알람 문장의 **키워드 목록 순서**로만 고르고 질문 문장은 보지 않기 때문
+  (`agent/graph.py`의 `_INCIDENT_TYPE_RULES`) → After에서 RAG + 우선순위 규칙으로 개선 예정

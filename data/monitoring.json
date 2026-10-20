@@ -1,38 +1,125 @@
 {
-  "auth-service": {
+  "gw-01": {
+    "name": "계측 게이트웨이",
+    "stage": "수집",
+    "aliases": ["게이트웨이", "계측", "통신", "데이터 수집", "RTU"],
     "status": "degraded",
-    "cpu_base": 78.0,
-    "memory_base": 61.0,
-    "alerts": ["p95 latency 2.4s (threshold 1.0s)", "connection pool 92% used"]
+    "metrics": {
+      "connected_devices": 8,
+      "total_devices": 9,
+      "last_data_min_ago": 18,
+      "missing_rate_percent": 12
+    },
+    "alerts": ["evc-01 Modbus 응답 없음 18분", "데이터 결측률 12% (기준 5%)"]
   },
-  "web-01": {
+  "pv-01": {
+    "name": "태양광 1호기",
+    "stage": "생산",
+    "aliases": ["태양광 1호기", "1호기 태양광", "PV1"],
+    "status": "degraded",
+    "metrics": {
+      "output_kw": 270,
+      "capacity_kw": 300,
+      "irradiance_wm2": 850,
+      "pr_percent": 84
+    },
+    "alerts": ["출력제어 지시 수신: 14:00~16:00 역송 0kW 제한"]
+  },
+  "pv-02": {
+    "name": "태양광 2호기",
+    "stage": "생산",
+    "aliases": ["태양광 2호기", "2호기 태양광", "PV2"],
+    "status": "degraded",
+    "metrics": {
+      "output_kw": 96,
+      "capacity_kw": 200,
+      "irradiance_wm2": 850,
+      "pr_percent": 46
+    },
+    "alerts": ["발전 효율(PR) 46% (기준 75% 미만)", "인버터 스트링 3 전류 0A"]
+  },
+  "pcc-01": {
+    "name": "계통 연계점(수전)",
+    "stage": "이동",
+    "aliases": ["연계점", "수전", "계약전력", "최대수요", "피크", "DR", "수요반응", "역송"],
+    "status": "degraded",
+    "metrics": {
+      "import_kw": 0,
+      "export_kw": 36,
+      "contract_kw": 500,
+      "today_peak_kw": 472
+    },
+    "alerts": [
+      "오늘 15분 최대수요 472kW (10:15, 계약전력 500kW의 94%)",
+      "역송 36kW 발생 (14:00 이후 역송 0kW 제한 예정)",
+      "수요반응(DR) 감축 요청: 15:00~16:00, 80kW 감축"
+    ]
+  },
+  "tr-01": {
+    "name": "변압기",
+    "stage": "이동",
+    "aliases": ["변압기", "모선", "전압"],
+    "status": "degraded",
+    "metrics": {
+      "load_ratio_percent": 49,
+      "bus_voltage_v": 403,
+      "rated_voltage_v": 380
+    },
+    "alerts": ["저압 모선 전압 403V (정격 380V 대비 +6.1%)"]
+  },
+  "ess-01": {
+    "name": "ESS 1호기(옥내)",
+    "stage": "저장",
+    "aliases": ["ESS 1호기", "1호기 ESS", "옥내 ESS", "ESS1"],
+    "status": "degraded",
+    "metrics": {
+      "capacity_kwh": 500,
+      "soc_percent": 86,
+      "soc_upper_limit": 80,
+      "soc_lower_limit": 15,
+      "charge_kw": 70,
+      "discharge_kw": 0,
+      "cell_temp_max_c": 46
+    },
+    "alerts": ["SOC 86% (옥내 충전 상한 80% 초과)", "셀 최고온도 46°C (경보 45°C)"]
+  },
+  "ess-02": {
+    "name": "ESS 2호기(옥외)",
+    "stage": "공급",
+    "aliases": ["ESS 2호기", "2호기 ESS", "옥외 ESS", "ESS2"],
+    "status": "degraded",
+    "metrics": {
+      "capacity_kwh": 250,
+      "soc_percent": 12,
+      "soc_upper_limit": 90,
+      "soc_lower_limit": 15,
+      "charge_kw": 0,
+      "discharge_kw": 30,
+      "cell_temp_max_c": 29
+    },
+    "alerts": ["SOC 12% (방전 하한 15% 미만)", "충방전 스케줄 상충: ess-01 충전 중 방전"]
+  },
+  "load-01": {
+    "name": "단지 부하",
+    "stage": "공급",
+    "aliases": ["부하", "건물", "단지 부하", "사용량"],
     "status": "healthy",
-    "cpu_base": 34.0,
-    "memory_base": 48.0,
+    "metrics": {
+      "demand_kw": 230
+    },
     "alerts": []
   },
-  "payments-service": {
+  "evc-01": {
+    "name": "EV 충전기",
+    "stage": "공급",
+    "aliases": ["EV", "충전기", "전기차"],
     "status": "degraded",
-    "cpu_base": 91.0,
-    "memory_base": 55.0,
-    "alerts": ["CPU 91% (threshold 80%)", "payments-service-3 instance responding slow"]
-  },
-  "cache-service": {
-    "status": "degraded",
-    "cpu_base": 42.0,
-    "memory_base": 89.0,
-    "alerts": ["memory usage climbing steadily over 6h", "heap near limit"]
-  },
-  "gateway-service": {
-    "status": "degraded",
-    "cpu_base": 30.0,
-    "memory_base": 45.0,
-    "alerts": ["upstream timeout to payments-service (504)", "network packet loss 3%"]
-  },
-  "log-service": {
-    "status": "degraded",
-    "cpu_base": 20.0,
-    "memory_base": 35.0,
-    "alerts": ["disk usage 95% on /var/log", "disk space low"]
+    "metrics": {
+      "charging_kw": 60,
+      "ports_in_use": 2,
+      "ports_total": 6,
+      "data_age_min": 18
+    },
+    "alerts": ["데이터 18분 전 값 (게이트웨이 통신 두절)"]
   }
 }

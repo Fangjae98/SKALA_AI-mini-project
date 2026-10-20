@@ -1,4 +1,7 @@
-"""v2 Supervisor — 실제 langgraph.StateGraph (Wave 4·5·6·7·8·10b·15 통합).
+"""v2 Supervisor — 분산에너지 운영 에이전트의 langgraph.StateGraph.
+
+[Base 대비 변경] 노드 구성·연결은 그대로, 설비 이름 찾기·MCP Tool 이름·매뉴얼 선택 규칙만
+분산에너지용으로 교체 (Wave 4·5·6·7·8·10b·15 통합 구조 유지).
 
 route → (chat 직행 | incident 파이프라인)
 incident: plan(MCP Prompt 절차 반영) → gate(권위 게이트) → research(가드+병렬+재시도)
@@ -9,10 +12,8 @@ incident: plan(MCP Prompt 절차 반영) → gate(권위 게이트) → research
 각 노드는 @traceable로 LangSmith에 계층 트리로 기록된다.
 """
 import asyncio
-import json
 import time
 from functools import partial
-from pathlib import Path
 from typing import Any, TypedDict
 
 from langgraph.config import get_stream_writer
@@ -20,31 +21,19 @@ from langgraph.graph import END, StateGraph
 from langsmith import traceable
 
 from .deps import SupervisorDeps
+from .equipment import DEFAULT_EQUIPMENT, find_mentions
 from .retry import with_retry
 
 
-def _load_known_systems() -> set[str]:
-    """ollama_llm.py/openai_llm.py와 동일한 소스(data/monitoring.json)에서
-    시스템 목록을 읽는다 — plan_node가 MCP Prompt에 넘길 system_name을
-    쿼리에서 멤버십 매칭으로 뽑아낼 때 쓴다."""
-    path = Path(__file__).resolve().parent.parent / "data" / "monitoring.json"
-    try:
-        return set(json.loads(path.read_text()).keys())
-    except (OSError, json.JSONDecodeError):
-        return {"auth-service", "web-01"}
-
-
-KNOWN_SYSTEMS = _load_known_systems()
-
-
 def _extract_system_name(query: str) -> str:
-    """정규식 대신 실제 KNOWN_SYSTEMS 멤버십 매칭 — MCP Prompt(incident_analysis_
-    prompt)의 system_name은 "시스템: X" 한 줄짜리 컨텍스트라 항상 정해진 이름
-    중 하나로만 고정한다(여러 개 언급돼도 join하지 않음 — 실제 조사 대상 목록은
-    이후 plan()의 tasks가 별도로 결정). 쿼리에서 가장 먼저 등장하는 시스템을
-    고르고, 하나도 안 걸리면 가장 흔한 사례인 auth-service로 폴백."""
-    matches = [(query.index(s), s) for s in KNOWN_SYSTEMS if s in query]
-    return min(matches)[1] if matches else "auth-service"
+    """MCP Prompt(incident_analysis_prompt)에 넘길 '설비: X' 한 줄용 이름.
+
+    [Base 대비 변경] 영어 서버 이름 정확 일치 → equipment.find_mentions로 설비 ID와
+    한국어 별칭(태양광 2호기, ESS, 변압기 …)을 함께 찾는다. 여러 설비가 언급되면 가장
+    먼저 나온 하나만 고르고(실제 조사 대상 목록은 plan()의 tasks가 별도로 결정), 하나도
+    안 걸리면 단지 전체 전력이 지나가는 연계점(pcc-01)으로 폴백."""
+    mentions = find_mentions(query)
+    return mentions[0] if mentions else DEFAULT_EQUIPMENT
 
 
 class AgentState(TypedDict, total=False):
@@ -161,8 +150,8 @@ async def research_node(state: AgentState, deps: SupervisorDeps) -> dict:
         await asyncio.sleep(0.35)   # 태스크당 고정 지연 — 병렬 효과를 실측하기 위함
         if task["kind"] == "monitoring":
             data, retries = await with_retry(
-                deps.mcp.call_tool, "get_monitoring_status",
-                {"system_name": task["target"]})
+                deps.mcp.call_tool, "get_equipment_status",
+                {"equipment_id": task["target"]})
             return {"idx": idx, "source": "monitoring", "data": data, "retries": retries}
         uri = runbook_uri_template.format(incident_type=task["target"])
         data = await deps.mcp.read_resource(uri, server=runbook_server)
@@ -186,20 +175,27 @@ async def research_node(state: AgentState, deps: SupervisorDeps) -> dict:
             "parallel_elapsed": elapsed, "events": events}
 
 
-# 수집된 모니터링 결과(상태·알림 문구)를 보고 어떤 runbook이 맞는지 고른다. LLM에게
-# 다시 묻는 대신 코드 레벨 규칙으로 판단한다 — gate(Wave 6)·replan(Wave 7)과 같은 설계
-# 원칙: 모델의 판단을 그대로 믿지 않고, 실측 데이터로 검증 가능한 결정은 코드가 내린다.
+# 수집된 계측 결과(상태·알람 문구)를 보고 어떤 대응 매뉴얼이 맞는지 고른다. LLM에게
+# 다시 묻는 대신 코드 레벨 규칙으로 판단한다(Base와 같은 방식).
+# [Base 대비 변경] IT 장애 키워드 → 분산에너지 알람 키워드. 순서는 전력 흐름
+# (생산 → 이동 → 저장 → 공급 → 수집)대로 적었다 — 위에서부터 먼저 걸리는 규칙이 이긴다.
+# ⚠️ Before 버전의 알려진 한계: 알람이 여러 개면 '목록 순서'로 결정돼 안전 이슈(셀 과열)가
+#    뒤로 밀릴 수 있고, 질문 문장은 보지 않는다. → After에서 RAG + 우선순위 규칙으로 개선.
 _INCIDENT_TYPE_RULES = [
-    ("latency", "high-latency"),
-    ("pool", "high-latency"),
-    ("cpu", "cpu-spike"),
-    ("memory", "memory-leak"),
-    ("heap", "memory-leak"),
-    ("timeout", "network-timeout"),
-    ("network", "network-timeout"),
-    ("disk", "disk-full"),
-    ("down", "db-down"),
+    ("출력제어", "curtailment"),
+    ("발전 효율", "pv-underperform"),
+    ("스트링", "pv-underperform"),
+    ("전압", "voltage-rise"),
+    ("최대수요", "peak-demand"),
+    ("충전 상한", "ess-soc-limit"),
+    ("온도", "ess-overheat"),
+    ("방전 하한", "ess-soc-low"),
+    ("감축 요청", "dr-event"),
+    ("응답 없음", "comm-loss"),
+    ("결측", "comm-loss"),
+    ("통신 두절", "comm-loss"),
 ]
+_FALLBACK_INCIDENT_TYPE = "peak-demand"   # 아무 규칙도 안 걸리면 가장 흔한 사례로 폴백(Base의 db-down 역할)
 
 
 def _classify_incident_type(collected: list[dict]) -> str:
@@ -210,7 +206,7 @@ def _classify_incident_type(collected: list[dict]) -> str:
     for keyword, incident_type in _INCIDENT_TYPE_RULES:
         if keyword in text:
             return incident_type
-    return "db-down"   # 매칭되는 증상이 없으면 가장 일반적인 장애 대응 절차로 폴백
+    return _FALLBACK_INCIDENT_TYPE
 
 
 @traceable(name="replan_check_node")

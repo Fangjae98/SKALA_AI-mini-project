@@ -8,6 +8,12 @@ import re
 
 from langsmith import traceable
 
+from .equipment import DEFAULT_EQUIPMENT, REFERENCE_EQUIPMENT, describe, find_mentions
+
+# [Base 대비 변경] IT 장애 단어(장애|진단|다운|지연 …) → 분산에너지 이상 단어
+INCIDENT_PATTERN = (r"이상|진단|경보|알람|고장|저하|낮|높|급증|초과|두절|출력제어|피크|"
+                    r"최대수요|감축|과열|온도|방전|충전|전압|원인|대응|안 들어|incident")
+
 
 class FakeLLM:
     def __init__(self, name: str, usd_per_1k_tokens: float):
@@ -25,8 +31,8 @@ class FastLLM(FakeLLM):
 
     @traceable(run_type="llm", name="fast_llm.route")
     def route(self, query: str) -> tuple[dict, dict]:
-        """Wave 5 — 쿼리 라우팅. 장애 관련이면 incident 파이프라인, 아니면 chat 직행."""
-        incident = bool(re.search(r"장애|진단|다운|지연|급증|incident|티켓", query))
+        """Wave 5 — 쿼리 라우팅. 설비 이상 관련이면 incident 파이프라인, 아니면 chat 직행."""
+        incident = bool(re.search(INCIDENT_PATTERN, query))
         result = {"route": "incident" if incident else "chat", "needs_analysis": False}
         return result, self._usage(query, str(result))
 
@@ -37,9 +43,10 @@ class FastLLM(FakeLLM):
         Wave 6 재현: needs_analysis=False라고 스스로 판단해 놓고도 analysis task를
         끼워 넣는 '모델의 자기모순'을 결정론적으로 재현한다 → gate 노드가 걸러낸다.
         """
-        systems = re.findall(r"[a-z][a-z0-9-]+-(?:service|\d+)", query) or ["auth-service"]
-        if "web-01" not in systems:
-            systems.append("web-01")   # 연관 시스템 비교 조회 → Wave 10b 병렬 실행 대상
+        # [Base 대비 변경] 영어 서버 이름 정규식 → 설비 ID + 한국어 별칭 찾기
+        systems = find_mentions(query) or [DEFAULT_EQUIPMENT]
+        if REFERENCE_EQUIPMENT not in systems:
+            systems.append(REFERENCE_EQUIPMENT)   # 비교용 단지 부하 조회 → Wave 10b 병렬 실행 대상
         tasks = [
             {"id": f"task-{i}", "agent": "research", "kind": "monitoring",
              "target": s, "status": "pending"}
@@ -52,16 +59,17 @@ class FastLLM(FakeLLM):
 
     @traceable(run_type="llm", name="fast_llm.analyze")
     def analyze(self, collected: list[dict]) -> tuple[str, dict]:
-        """Wave 6 보완 — 여러 시스템의 monitoring 결과 사이에 공통 패턴이 있는지 비교."""
+        """Wave 6 보완 — 여러 설비의 계측 결과 사이에 단계 간 연쇄가 있는지 비교."""
         mon = [c["data"] for c in collected if c["source"] == "monitoring"]
-        degraded = [d["system_name"] for d in mon if d.get("status") != "healthy"]
+        degraded = [d["equipment_id"] for d in mon if d.get("status") != "healthy"]
+        stages = sorted({d.get("stage", "") for d in mon if d.get("status") != "healthy"})
         if len(degraded) >= 2:
-            summary = (f"{', '.join(degraded)} 복수 시스템이 동시에 저하됨 — "
-                       f"공유 의존성 등 공통 원인이 의심됨")
+            summary = (f"{', '.join(degraded)} 복수 설비가 동시에 이상 "
+                       f"({'·'.join(stages)} 단계) — 단계 간 연쇄 영향이 의심됨")
         elif degraded:
-            summary = f"{degraded[0]}만 단독 저하 — 연관 시스템은 정상, 국소 이슈로 추정"
+            summary = f"{degraded[0]}만 단독 이상 — 연관 설비는 정상, 국소 이슈로 추정"
         else:
-            summary = "모니터링된 시스템 모두 healthy — 패턴상 이상 징후 없음"
+            summary = "조회한 설비 모두 healthy — 이상 징후 없음"
         return summary, self._usage(str(collected), summary)
 
     @traceable(run_type="llm", name="fast_llm.chat")
@@ -106,11 +114,8 @@ class QualityLLM(FakeLLM):
 
         mon = [c for c in collected if c["source"] == "monitoring"]
         run = [c for c in collected if c["source"] == "runbook"]
-        summary = " · ".join(
-            f"{c['data']['system_name']} 상태={c['data']['status']}, "
-            f"CPU {c['data']['cpu_percent']}% (알림 {len(c['data']['alerts'])}건)"
-            for c in mon)
-        lines = [f"'{query}' 진단 결과:", f"1) 모니터링: {summary}"]
+        summary = " · ".join(describe(c["data"]) for c in mon)
+        lines = [f"'{query}' 진단 결과:", f"1) 설비 상태: {summary}"]
         if run:
             body_lines = [l.strip() for l in run[0]["data"].strip().splitlines() if l.strip()]
             title = body_lines[0].lstrip("# ")
@@ -118,7 +123,7 @@ class QualityLLM(FakeLLM):
                      if (m := re.match(r"^\d+\.\s+(.*)", l))]
             advice = " ".join(steps[1:3]) or "표준 절차를 따라 조치하세요."
             lines.append(f"2) 표준 절차: '{title}'에 따라 {advice}")
-        lines.append("3) 정상화 확인 후 원인 분석과 재발 방지 대책을 문서화하세요.")
+        lines.append("3) 설비를 움직이는 조치는 운영자 승인 후 시행하고, 정상화 후 원인과 재발 방지 대책을 기록하세요.")
         draft = " ".join(lines)
         if on_token is not None:
             on_token(draft)

@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>운영 에이전트 채팅 (Vue)</title>
+<title>분산에너지 운영 에이전트 (Vue)</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -79,7 +79,7 @@
 </head>
 <body>
 <div id="app">
-  <header>운영 인시던트 대응 에이전트 <span>{{ backendLabel }}</span></header>
+  <header>분산에너지 운영 에이전트 <span>{{ backendLabel }}</span></header>
   <div id="log" ref="logEl">
     <template v-for="item in log" :key="item.id">
       <div v-if="item.kind === 'user'" class="row user">
@@ -104,7 +104,7 @@
     <input
       v-model="input"
       autocomplete="off"
-      placeholder="예: auth-service 로그인 응답이 느려졌어요. 원인 확인해주세요"
+      placeholder="예: 태양광 2호기 발전량이 평소보다 너무 낮아요, 원인 확인해주세요"
     />
     <button type="submit" :disabled="sending">보내기</button>
   </form>
@@ -115,12 +115,12 @@
 const { createApp, ref, reactive, nextTick } = Vue;
 
 const STEP_LABELS = {
-  PlanCreated: e => `계획 수립: 할 일 ${e.task_count}가지${e.targets?.length ? ` (시스템: ${e.targets.join(', ')})` : ''}`,
+  PlanCreated: e => `계획 수립: 할 일 ${e.task_count}가지${e.targets?.length ? ` (설비: ${e.targets.join(', ')})` : ''}`,
   GateApplied: e => e.removed_analysis_tasks ? `불필요한 작업 ${e.removed_analysis_tasks}건 제거` : null,
   TaskCompleted: e => (e.source === 'monitoring'
-      ? `모니터링 지표 확인 (시스템: ${e.target})`
-      : `대응 매뉴얼(runbook) 조회 (장애유형: ${e.target})`) + (e.retries ? ' (재시도 성공)' : ''),
-  ReplanCheck: e => e.is_sufficient ? null : `정보 부족 → 장애유형 "${e.target}"로 추가 조사`,
+      ? `설비 계측값 확인 (설비: ${e.target})`
+      : `대응 매뉴얼 조회 (이상 유형: ${e.target})`) + (e.retries ? ' (재시도 성공)' : ''),
+  ReplanCheck: e => e.is_sufficient ? null : `정보 부족 → 이상 유형 "${e.target}" 매뉴얼 추가 조사`,
   DraftWritten: e => `답변 초안 작성 (시도 ${e.attempt})`,
   Validation: e => e.verdict === '합격' ? '검수 통과' : '검수 반려 → 다시 작성',
   Finalize: () => '최종 답변 완성',
@@ -128,7 +128,7 @@ const STEP_LABELS = {
 
 createApp({
   setup() {
-    const backendLabel = ref('all_total_vue');
+    const backendLabel = ref('der_ops_agent');
     const log = ref([]);
     const input = ref('');
     const sending = ref(false);
@@ -137,7 +137,7 @@ createApp({
     let nextId = 0;
 
     fetch('/health').then(r => r.json()).then(h => {
-      backendLabel.value = `${h.llm_backend} 실모델(${h.fast_llm}/${h.quality_llm}) · all_total_vue`;
+      backendLabel.value = `${h.llm_backend}${h.llm_backend === 'fake' ? ' 가짜 모델' : ' 실모델'}(${h.fast_llm}/${h.quality_llm}) · der_ops_agent`;
     }).catch(() => {});
 
     async function scrollToBottom() {

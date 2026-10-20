@@ -1,4 +1,4 @@
-"""all_total 통합 실습 — FastAPI 백엔드 (Wave 1·3·12·14 축 + 전체 조립).
+"""분산에너지 운영 에이전트 — FastAPI 백엔드 (Base all_total_vue와 동일 구조, Wave 1·3·12·14 축 + 전체 조립).
 
 - Wave 1  : lifespan에서 Agent 번들(MCP 연결·LLM·그래프)을 프로세스당 정확히 1회 생성,
             app.state로 모든 요청이 공유 (creation_count/instance_id로 증명)

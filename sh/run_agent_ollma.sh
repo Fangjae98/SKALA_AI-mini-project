@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# all_total — Ollama 실모델로 에이전트를 "기동만" 해두는 스크립트.
+# der_ops_agent — Ollama 실모델로 에이전트를 "기동만" 해두는 스크립트.
 #
 # run_ollama_test.sh처럼 자동으로 요청을 보내고 검증한 뒤 끝나는 것이 아니라,
 # 서버를 켠 채로 그대로 떠 있게 두어 사용자가 직접 테스트해볼 수 있게 한다:
@@ -26,7 +26,7 @@ if [ ! -f .env ]; then
     exit 1
 fi
 set -a; source .env; set +a
-export LANGCHAIN_PROJECT="capstone-all-total-ollama"   # fake 모드와 프로젝트 분리
+export LANGCHAIN_PROJECT="der-ops-agent-ollama"   # fake 모드와 프로젝트 분리
 echo "LangSmith: project=$LANGCHAIN_PROJECT tracing=${LANGCHAIN_TRACING_V2:-}"
 echo "모델: fast=$FAST_MODEL / quality=$QUALITY_MODEL"
 
@@ -89,12 +89,12 @@ cat <<EOF
 
 1) curl로 말 걸어보기
    curl -s -X POST localhost:8100/chat -H 'Content-Type: application/json' \\
-     -d '{"message":"auth-service 로그인 응답이 느려졌어요. 원인 확인해주세요","thread_id":"t-test"}' \\
+     -d '{"message":"태양광 2호기 발전량이 평소보다 너무 낮아요, 원인 확인해주세요","thread_id":"t-test"}' \\
      | python3 -m json.tool --no-ensure-ascii
 
 2) 실시간 진행 상황 보기 (스트리밍)
    curl -sN -G "localhost:8100/chat/stream" \\
-     --data-urlencode "message=web-01 CPU 급증 원인 진단해줘" \\
+     --data-urlencode "message=ESS 1호기 온도가 계속 올라가요" \\
      --data-urlencode "thread_id=t-test-sse"
 
 3) 브라우저 채팅 화면으로 써보기 (새 터미널에서)

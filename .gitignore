@@ -3,3 +3,4 @@
 session.db
 __pycache__/
 *.log
+eval/regression_session.db

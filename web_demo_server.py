@@ -1,4 +1,4 @@
-"""web_demo_server.py — all_total_vue 에이전트와 브라우저 채팅창으로 대화해보는 데모.
+"""web_demo_server.py — 분산에너지 운영 에이전트와 브라우저 채팅창으로 대화해보는 데모(Base와 동일).
 
 web_chat.html이 바닐라 JS 대신 Vue 3(CDN 글로벌 빌드, 별도 빌드 단계 없음)로 되어
 있다는 점만 all_total과 다르다. server.py(8100, 기존 통합 테스트 서버)는 전혀

@@ -1,0 +1,210 @@
+{
+  "summary": {
+    "label": "before",
+    "backend": "fake",
+    "route_accuracy": "10/10",
+    "runbook_accuracy": "7/9",
+    "avg_elapsed_s": 0.72,
+    "total_cost_usd": 0.007217,
+    "avg_tool_calls": 2.8,
+    "avg_validation_attempts": 1.8
+  },
+  "rows": [
+    {
+      "id": 1,
+      "query": "태양광 2호기 발전량이 평소보다 너무 낮아요, 원인 확인해주세요",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "pv-underperform",
+      "runbooks": [
+        "pv-underperform"
+      ],
+      "runbook_ok": true,
+      "targets": [
+        "pv-02",
+        "load-01"
+      ],
+      "tool_calls": 3,
+      "validation_attempts": 2,
+      "retry_count": 1,
+      "cost_usd": 0.000805,
+      "elapsed_s": 1.21
+    },
+    {
+      "id": 2,
+      "query": "출력제어 지시가 들어왔는데 어떻게 대응해야 하나요?",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "curtailment",
+      "runbooks": [
+        "curtailment"
+      ],
+      "runbook_ok": true,
+      "targets": [
+        "pv-01",
+        "pv-02",
+        "load-01"
+      ],
+      "tool_calls": 4,
+      "validation_attempts": 2,
+      "retry_count": 0,
+      "cost_usd": 0.000943,
+      "elapsed_s": 0.77
+    },
+    {
+      "id": 3,
+      "query": "변압기 쪽 전압이 높다는 경보가 떴어요",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "voltage-rise",
+      "runbooks": [
+        "voltage-rise"
+      ],
+      "runbook_ok": true,
+      "targets": [
+        "tr-01",
+        "load-01"
+      ],
+      "tool_calls": 3,
+      "validation_attempts": 2,
+      "retry_count": 0,
+      "cost_usd": 0.000684,
+      "elapsed_s": 0.75
+    },
+    {
+      "id": 4,
+      "query": "오늘 오전 피크가 계약전력에 거의 닿았어요. 원인 분석해줘",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "peak-demand",
+      "runbooks": [
+        "peak-demand"
+      ],
+      "runbook_ok": true,
+      "targets": [
+        "pcc-01",
+        "load-01"
+      ],
+      "tool_calls": 3,
+      "validation_attempts": 2,
+      "retry_count": 0,
+      "cost_usd": 0.000885,
+      "elapsed_s": 0.75
+    },
+    {
+      "id": 5,
+      "query": "ESS 1호기 온도가 계속 올라가요",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "ess-overheat",
+      "runbooks": [
+        "ess-soc-limit"
+      ],
+      "runbook_ok": false,
+      "targets": [
+        "ess-01",
+        "load-01"
+      ],
+      "tool_calls": 3,
+      "validation_attempts": 2,
+      "retry_count": 0,
+      "cost_usd": 0.000759,
+      "elapsed_s": 0.74
+    },
+    {
+      "id": 6,
+      "query": "ESS 1호기 충전율이 80%를 넘었는데 괜찮나요?",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "ess-soc-limit",
+      "runbooks": [
+        "ess-soc-limit"
+      ],
+      "runbook_ok": true,
+      "targets": [
+        "ess-01",
+        "load-01"
+      ],
+      "tool_calls": 3,
+      "validation_attempts": 2,
+      "retry_count": 0,
+      "cost_usd": 0.000795,
+      "elapsed_s": 0.75
+    },
+    {
+      "id": 7,
+      "query": "ESS 2호기가 거의 방전됐어요",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "ess-soc-low",
+      "runbooks": [
+        "ess-soc-low"
+      ],
+      "runbook_ok": true,
+      "targets": [
+        "ess-02",
+        "load-01"
+      ],
+      "tool_calls": 3,
+      "validation_attempts": 2,
+      "retry_count": 0,
+      "cost_usd": 0.000743,
+      "elapsed_s": 0.75
+    },
+    {
+      "id": 8,
+      "query": "DR 감축 요청이 왔어요, 어떻게 대응하죠?",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "dr-event",
+      "runbooks": [
+        "peak-demand"
+      ],
+      "runbook_ok": false,
+      "targets": [
+        "pcc-01",
+        "load-01"
+      ],
+      "tool_calls": 3,
+      "validation_attempts": 2,
+      "retry_count": 0,
+      "cost_usd": 0.000855,
+      "elapsed_s": 0.75
+    },
+    {
+      "id": 9,
+      "query": "EV 충전기 데이터가 안 들어오는 것 같아요",
+      "route": "incident",
+      "route_ok": true,
+      "expected_runbook": "comm-loss",
+      "runbooks": [
+        "comm-loss"
+      ],
+      "runbook_ok": true,
+      "targets": [
+        "evc-01",
+        "load-01"
+      ],
+      "tool_calls": 3,
+      "validation_attempts": 2,
+      "retry_count": 0,
+      "cost_usd": 0.000745,
+      "elapsed_s": 0.75
+    },
+    {
+      "id": 10,
+      "query": "안녕, 너는 뭘 할 수 있어?",
+      "route": "chat",
+      "route_ok": true,
+      "expected_runbook": null,
+      "runbooks": [],
+      "runbook_ok": true,
+      "targets": [],
+      "tool_calls": 0,
+      "validation_attempts": 0,
+      "retry_count": 0,
+      "cost_usd": 3e-06,
+      "elapsed_s": 0.01
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# all_total_vue — 로컬 Ollama 환경을 구성하는 스크립트.
+# der_ops_agent — 로컬 Ollama 환경을 구성하는 스크립트.
 #
 # 이 실습에 필요한 모델(기본 qwen3:0.6b / qwen3:8b)이 이미 받아져 있으면 그대로
 # 재사용하고(삭제·재다운로드 없음), 없는 모델만 새로 받는다.

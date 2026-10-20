@@ -1,61 +1,66 @@
-"""all_total 통합 실습 — MCP Server (Wave 2 축).
+"""분산에너지 운영 에이전트 — MCP Server ("ops").
 
-Tool / Resource / Prompt 3대 capability를 모두 노출하는 실제 fastmcp 서버.
+Tool / Resource / Prompt 3대 capability를 모두 노출하는 fastmcp 서버.
 FastAPI 백엔드(server.py)가 lifespan에서 이 파일을 subprocess(stdio)로 1회 기동해
-프로세스가 살아 있는 동안 재사용한다 (Wave 1 싱글턴 + Wave 2 표준화의 결합).
+프로세스가 살아 있는 동안 재사용한다.
 
-- Tool    get_monitoring_status : 호출마다 값이 달라지는 동적 조회 → Tool이 맞다
-- Resource runbook://incident-response/{incident_type} : URI로 식별되는 정적 문서
-- Prompt  incident_analysis_prompt : 여러 Tool을 조합하는 표준 진단 절차를 강제
+- Tool     get_equipment_status : 설비 1대의 현재 계측값과 알람 조회
+- Resource runbook://der-response/{incident_type} : 이상 유형별 대응 매뉴얼(정적 문서)
+- Prompt   incident_analysis_prompt : 분산에너지 이상 진단 표준 절차
+
+[Base 대비 변경] 서버 CPU/메모리 2칸 고정 → 설비별 metrics 묶음, 서버 이름 → 설비 ID,
+runbook URI runbook://incident-response/ → runbook://der-response/,
+진단 절차를 생산·이동·저장·공급 + 수집 단계 기준으로 변경.
+계측값은 전력 수지(공급 = 수요)가 맞도록 고정 스냅샷을 그대로 돌려준다(Base의 무작위
+흔들기 제거 — 숫자가 흔들리면 전력 수지와 보고서 수치를 검증할 수 없기 때문).
 """
 import json
-import random
 from datetime import datetime
 from pathlib import Path
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
-mcp = FastMCP(name="capstone-all-total-ops")
+mcp = FastMCP(name="der-ops-agent-ops")
 
 DATA_DIR = Path(__file__).parent / "data"
 
 
-class SystemStatus(BaseModel):
-    system_name: str = Field(description="시스템 이름")
-    status: str = Field(description="상태: healthy / degraded / down")
-    cpu_percent: float = Field(description="CPU 사용률 (%)")
-    memory_percent: float = Field(description="메모리 사용률 (%)")
-    last_checked: str = Field(description="마지막 체크 시각 (ISO 8601)")
-    alerts: list[str] = Field(default_factory=list, description="활성 알림 목록")
+class EquipmentStatus(BaseModel):
+    equipment_id: str = Field(description="설비 ID (예: pv-02)")
+    name: str = Field(description="설비 이름 (예: 태양광 2호기)")
+    stage: str = Field(description="전력 흐름 단계: 수집 / 생산 / 이동 / 저장 / 공급")
+    status: str = Field(description="상태: healthy / degraded / down / unknown")
+    metrics: dict[str, int | float] = Field(default_factory=dict, description="계측값 묶음")
+    last_checked: str = Field(description="조회 시각 (ISO 8601)")
+    alerts: list[str] = Field(default_factory=list, description="활성 알람 목록")
 
 
 @mcp.tool()
-def get_monitoring_status(system_name: str) -> SystemStatus:
-    """지정된 시스템의 현재 모니터링 상태를 조회합니다 (호출마다 값이 달라지는 동적 Tool)."""
-    monitoring_data = json.loads((DATA_DIR / "monitoring.json").read_text())
-    if system_name not in monitoring_data:
-        return SystemStatus(
-            system_name=system_name, status="unknown",
-            cpu_percent=0.0, memory_percent=0.0,
-            last_checked=datetime.now().isoformat(),
-            alerts=[f"System '{system_name}' not found in monitoring"],
+def get_equipment_status(equipment_id: str) -> EquipmentStatus:
+    """지정한 분산에너지 설비의 현재 계측값과 알람을 조회합니다."""
+    equipment = json.loads((DATA_DIR / "monitoring.json").read_text())
+    now = datetime.now().isoformat(timespec="seconds")
+    if equipment_id not in equipment:
+        return EquipmentStatus(
+            equipment_id=equipment_id, name="(미등록)", stage="-", status="unknown",
+            last_checked=now, alerts=[f"설비 '{equipment_id}'은(는) 등록되지 않은 설비입니다"],
         )
-    data = monitoring_data[system_name]
-    jitter = random.uniform(-3.0, 8.0)
-    return SystemStatus(
-        system_name=system_name,
+    data = equipment[equipment_id]
+    return EquipmentStatus(
+        equipment_id=equipment_id,
+        name=data["name"],
+        stage=data["stage"],
         status=data["status"],
-        cpu_percent=round(data["cpu_base"] + jitter, 1),
-        memory_percent=round(data["memory_base"] + jitter / 2, 1),
-        last_checked=datetime.now().isoformat(timespec="microseconds"),
+        metrics=data.get("metrics", {}),
+        last_checked=now,
         alerts=data.get("alerts", []),
     )
 
 
-@mcp.resource("runbook://incident-response/{incident_type}")
+@mcp.resource("runbook://der-response/{incident_type}")
 def get_incident_runbook(incident_type: str) -> str:
-    """특정 incident 유형의 runbook(정적 문서)을 반환합니다."""
+    """이상 유형별 대응 매뉴얼(정적 문서)을 반환합니다."""
     runbook_path = DATA_DIR / "runbooks" / f"{incident_type}.md"
     if not runbook_path.exists():
         return f"# Runbook Not Found\n\nNo runbook for incident type: {incident_type}"
@@ -64,17 +69,18 @@ def get_incident_runbook(incident_type: str) -> str:
 
 @mcp.prompt()
 def incident_analysis_prompt(system_name: str, symptom: str) -> str:
-    """장애 진단 표준 절차 프롬프트 — planning 노드가 계획을 세울 때 이 절차를 따른다."""
-    return f"""다음 장애에 대해 표준 진단 절차를 수행하세요.
+    """분산에너지 이상 진단 표준 절차 — planning 노드가 계획을 세울 때 이 절차를 따른다."""
+    return f"""다음 분산에너지 설비 이상에 대해 표준 진단 절차를 수행하세요.
 
-## 장애 정보
-- 시스템: {system_name}
+## 이상 정보
+- 설비: {system_name}
 - 증상: {symptom}
 
 ## 진단 절차 (반드시 순서대로 수행)
-1. get_monitoring_status Tool로 관련 시스템의 현재 상태를 조회하세요.
-2. 증상에 해당하는 runbook(runbook://incident-response/...)을 확인하세요.
-3. 위 정보를 종합해 가능한 원인과 권장 조치를 제시하세요.
+1. get_equipment_status Tool로 관련 설비의 현재 계측값과 알람을 조회하세요.
+2. 이상이 전력 흐름의 어느 단계(생산·이동·저장·공급, 데이터 수집)에서 났는지 정하세요.
+3. 증상에 해당하는 대응 매뉴얼(runbook://der-response/...)을 확인하세요.
+4. 위 정보를 종합해 가능한 원인과 권장 조치를 제시하세요. 설비를 움직이는 조치는 운영자 승인 필요로 표시하세요.
 """
 
 

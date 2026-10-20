@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# all_total_vue — 이 프로젝트 전용 .venv를 만들고 requirements.txt를 설치하는 스크립트.
+# der_ops_agent — 이 프로젝트 전용 .venv를 만들고 requirements.txt를 설치하는 스크립트.
 #
 # 다른 sh/ 스크립트들(run_agent_ollma.sh 등)은 ".venv가 이미 있으면 쓴다"고만
 # 가정할 뿐 직접 만들어주지는 않는다 — 이 스크립트가 그 "맨 처음 한 번"을 담당한다.

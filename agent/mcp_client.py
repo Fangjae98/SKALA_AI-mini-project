@@ -1,11 +1,11 @@
 """Wave 2 — MCP 서버 여러 개를 subprocess(stdio)로 1회씩 기동해 재사용하는 클라이언트.
 
 Wave 1의 교훈대로 서버(lifespan)에서 한 번만 연결을 만들고 모든 요청이 공유한다.
-Wave 9 데모용으로, 프로세스 최초의 get_monitoring_status 호출 1회는 일부러
+Wave 9 데모용으로, 프로세스 최초의 get_equipment_status 호출 1회는 일부러
 asyncio.TimeoutError를 던진다(transient) — with_retry가 backoff 후 복구해야 한다.
 
-연결 대상은 "ops"(mcp_server.py — monitoring tool + runbook resource + prompt, 실제
-사용)와 "docs"(mcp_server_docs.py — API 문서 resource만 제공, agent는 사용하지 않는
+연결 대상은 "ops"(mcp_server.py — 설비 계측 tool + 대응 매뉴얼 resource + prompt, 실제
+사용)와 "docs"(mcp_server_docs.py — 참고 문서 resource만 제공, agent는 사용하지 않는
 decoy) 두 서버다. resource/prompt를 요청할 때는 어느 서버가 그걸 들고 있는지 미리
 알고 있지 않다고 가정하고, find_resource_template()/find_prompt()로 연결된 서버들을
 순서대로 조회(list)해 이름이 맞는 걸 찾은 뒤에야 그 서버로 read_resource/get_prompt를
@@ -69,7 +69,7 @@ class MCPClient:
 
     @traceable(run_type="tool", name="mcp.call_tool")
     async def call_tool(self, name: str, arguments: dict, server: str = "ops") -> dict:
-        if self._flaky_pending and name == "get_monitoring_status":
+        if self._flaky_pending and name == "get_equipment_status":
             self._flaky_pending = False
             raise asyncio.TimeoutError("simulated transient timeout (Wave 9 demo)")
         async with self._lock:

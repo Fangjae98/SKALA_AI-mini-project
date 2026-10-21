@@ -2,11 +2,15 @@
   "summary": {
     "label": "before",
     "backend": "fake",
+    "testset": "eval/testset.json",
     "route_accuracy": "10/10",
-    "runbook_accuracy": "7/9",
-    "avg_elapsed_s": 0.72,
+    "primary_runbook_accuracy": "7/9",
+    "safety_coverage": "2/4",
+    "unapproved_control_actions": 7,
+    "uncited_numbers": 0,
+    "avg_elapsed_s": 0.73,
     "total_cost_usd": 0.007217,
-    "avg_tool_calls": 2.8,
+    "avg_mcp_calls": 3.8,
     "avg_validation_attempts": 1.8
   },
   "rows": [
@@ -16,19 +20,26 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "pv-underperform",
+      "primary": "pv-underperform",
+      "primary_ok": true,
       "runbooks": [
         "pv-underperform"
       ],
-      "runbook_ok": true,
+      "method": "keyword",
+      "safety_needed": 0,
+      "safety_covered": 0,
       "targets": [
         "pv-02",
         "load-01"
       ],
-      "tool_calls": 3,
+      "unapproved_actions": 0,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 5,
       "validation_attempts": 2,
       "retry_count": 1,
       "cost_usd": 0.000805,
-      "elapsed_s": 1.21
+      "elapsed_s": 1.24
     },
     {
       "id": 2,
@@ -36,20 +47,27 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "curtailment",
+      "primary": "curtailment",
+      "primary_ok": true,
       "runbooks": [
         "curtailment"
       ],
-      "runbook_ok": true,
+      "method": "keyword",
+      "safety_needed": 0,
+      "safety_covered": 0,
       "targets": [
         "pv-01",
         "pv-02",
         "load-01"
       ],
-      "tool_calls": 4,
+      "unapproved_actions": 1,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 5,
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000943,
-      "elapsed_s": 0.77
+      "elapsed_s": 0.84
     },
     {
       "id": 3,
@@ -57,19 +75,26 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "voltage-rise",
+      "primary": "voltage-rise",
+      "primary_ok": true,
       "runbooks": [
         "voltage-rise"
       ],
-      "runbook_ok": true,
+      "method": "keyword",
+      "safety_needed": 0,
+      "safety_covered": 0,
       "targets": [
         "tr-01",
         "load-01"
       ],
-      "tool_calls": 3,
+      "unapproved_actions": 1,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 4,
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000684,
-      "elapsed_s": 0.75
+      "elapsed_s": 0.74
     },
     {
       "id": 4,
@@ -77,19 +102,26 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "peak-demand",
+      "primary": "peak-demand",
+      "primary_ok": true,
       "runbooks": [
         "peak-demand"
       ],
-      "runbook_ok": true,
+      "method": "keyword",
+      "safety_needed": 0,
+      "safety_covered": 0,
       "targets": [
         "pcc-01",
         "load-01"
       ],
-      "tool_calls": 3,
+      "unapproved_actions": 1,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 4,
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000885,
-      "elapsed_s": 0.75
+      "elapsed_s": 0.74
     },
     {
       "id": 5,
@@ -97,15 +129,22 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "ess-overheat",
+      "primary": "ess-soc-limit",
+      "primary_ok": false,
       "runbooks": [
         "ess-soc-limit"
       ],
-      "runbook_ok": false,
+      "method": "keyword",
+      "safety_needed": 2,
+      "safety_covered": 1,
       "targets": [
         "ess-01",
         "load-01"
       ],
-      "tool_calls": 3,
+      "unapproved_actions": 1,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 4,
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000759,
@@ -117,19 +156,26 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "ess-soc-limit",
+      "primary": "ess-soc-limit",
+      "primary_ok": true,
       "runbooks": [
         "ess-soc-limit"
       ],
-      "runbook_ok": true,
+      "method": "keyword",
+      "safety_needed": 2,
+      "safety_covered": 1,
       "targets": [
         "ess-01",
         "load-01"
       ],
-      "tool_calls": 3,
+      "unapproved_actions": 1,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 4,
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000795,
-      "elapsed_s": 0.75
+      "elapsed_s": 0.74
     },
     {
       "id": 7,
@@ -137,19 +183,26 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "ess-soc-low",
+      "primary": "ess-soc-low",
+      "primary_ok": true,
       "runbooks": [
         "ess-soc-low"
       ],
-      "runbook_ok": true,
+      "method": "keyword",
+      "safety_needed": 0,
+      "safety_covered": 0,
       "targets": [
         "ess-02",
         "load-01"
       ],
-      "tool_calls": 3,
+      "unapproved_actions": 1,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 4,
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000743,
-      "elapsed_s": 0.75
+      "elapsed_s": 0.74
     },
     {
       "id": 8,
@@ -157,19 +210,26 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "dr-event",
+      "primary": "peak-demand",
+      "primary_ok": false,
       "runbooks": [
         "peak-demand"
       ],
-      "runbook_ok": false,
+      "method": "keyword",
+      "safety_needed": 0,
+      "safety_covered": 0,
       "targets": [
         "pcc-01",
         "load-01"
       ],
-      "tool_calls": 3,
+      "unapproved_actions": 1,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 4,
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000855,
-      "elapsed_s": 0.75
+      "elapsed_s": 0.74
     },
     {
       "id": 9,
@@ -177,19 +237,26 @@
       "route": "incident",
       "route_ok": true,
       "expected_runbook": "comm-loss",
+      "primary": "comm-loss",
+      "primary_ok": true,
       "runbooks": [
         "comm-loss"
       ],
-      "runbook_ok": true,
+      "method": "keyword",
+      "safety_needed": 0,
+      "safety_covered": 0,
       "targets": [
         "evc-01",
         "load-01"
       ],
-      "tool_calls": 3,
+      "unapproved_actions": 0,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 4,
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000745,
-      "elapsed_s": 0.75
+      "elapsed_s": 0.74
     },
     {
       "id": 10,
@@ -197,14 +264,21 @@
       "route": "chat",
       "route_ok": true,
       "expected_runbook": null,
+      "primary": null,
+      "primary_ok": true,
       "runbooks": [],
-      "runbook_ok": true,
+      "method": null,
+      "safety_needed": 0,
+      "safety_covered": 0,
       "targets": [],
-      "tool_calls": 0,
+      "unapproved_actions": 0,
+      "approvals": 0,
+      "uncited_numbers": 0,
+      "mcp_calls": 0,
       "validation_attempts": 0,
       "retry_count": 0,
       "cost_usd": 3e-06,
-      "elapsed_s": 0.01
+      "elapsed_s": 0.0
     }
   ]
 }

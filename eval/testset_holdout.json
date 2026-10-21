@@ -1,0 +1,66 @@
+[
+ {
+  "id": "H1",
+  "query": "2호기 인버터 스트링 하나가 0A로 찍혀요",
+  "expected_route": "incident",
+  "expected_runbook": "pv-underperform",
+  "expected_targets": [
+   "pv-02"
+  ],
+  "expected_safety": []
+ },
+ {
+  "id": "H2",
+  "query": "역송 때문에 변압기 쪽이 불안정해 보여요",
+  "expected_route": "incident",
+  "expected_runbook": "voltage-rise",
+  "expected_targets": [
+   "tr-01"
+  ],
+  "expected_safety": []
+ },
+ {
+  "id": "H3",
+  "query": "배터리 랙 온도 경보가 계속 울려요",
+  "expected_route": "incident",
+  "expected_runbook": "ess-overheat",
+  "expected_targets": [
+   "ess-01",
+   "ess-02"
+  ],
+  "expected_safety": [
+   "ess-overheat",
+   "ess-soc-limit"
+  ]
+ },
+ {
+  "id": "H4",
+  "query": "15시에 사용량을 80kW 줄여야 한대요",
+  "expected_route": "incident",
+  "expected_runbook": "dr-event",
+  "expected_targets": [
+   "pcc-01"
+  ],
+  "expected_safety": []
+ },
+ {
+  "id": "H5",
+  "query": "게이트웨이 결측률이 높게 나와요",
+  "expected_route": "incident",
+  "expected_runbook": "comm-loss",
+  "expected_targets": [
+   "gw-01"
+  ],
+  "expected_safety": []
+ },
+ {
+  "id": "H6",
+  "query": "옥외 ESS 잔량이 바닥이에요",
+  "expected_route": "incident",
+  "expected_runbook": "ess-soc-low",
+  "expected_targets": [
+   "ess-02"
+  ],
+  "expected_safety": []
+ }
+]

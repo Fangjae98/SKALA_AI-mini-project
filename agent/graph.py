@@ -1,12 +1,14 @@
 """v2 Supervisor — 분산에너지 운영 에이전트의 langgraph.StateGraph.
 
-[Base 대비 변경] 노드 구성·연결은 그대로, 설비 이름 찾기·MCP Tool 이름·매뉴얼 선택 규칙만
-분산에너지용으로 교체 (Wave 4·5·6·7·8·10b·15 통합 구조 유지).
+[Before] 노드 구성·연결은 Base 그대로, 설비 이름 찾기·MCP Tool 이름·매뉴얼 선택 규칙만 분산에너지용으로 교체.
+[After]  research = 단계별 전문 에이전트(Multi-Agent) 병렬 호출, replan_check = RAG + 우선순위 매뉴얼 선택,
+         validate = 수치 인용 검사 추가, approval = 설비 제어 조치 사람 승인(HITL, interrupt) 노드 추가.
+         판단 기준은 모두 config/rules.json에서 읽는다.
 
 route → (chat 직행 | incident 파이프라인)
 incident: plan(MCP Prompt 절차 반영) → gate(권위 게이트) → research(가드+병렬+재시도)
           → replan_check(부족 시 gap task 후 재조사) → analysis(needs_analysis=True일 때만
-          실제 실행) → write → validate(반려 시 재작성) → finalize
+          실제 실행) → write → validate(반려 시 재작성) → approval(제어 조치 승인 대기) → finalize
 
 모든 노드는 SupervisorDeps를 functools.partial로 주입받는 순수 함수다(Wave 13).
 각 노드는 @traceable로 LangSmith에 계층 트리로 기록된다.
@@ -16,13 +18,19 @@ import time
 from functools import partial
 from typing import Any, TypedDict
 
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, StateGraph
+from langgraph.types import interrupt
 from langsmith import traceable
 
+from .approval import approval_footer, extract_control_actions
+from .config import RULES, incident_types_by_priority
 from .deps import SupervisorDeps
 from .equipment import DEFAULT_EQUIPMENT, find_mentions
-from .retry import with_retry
+from .selection import choose_runbooks
+from .specialists import build_specialist_graph, specialist_for
+from .validation import uncited_numbers
 
 
 def _extract_system_name(query: str) -> str:
@@ -52,6 +60,7 @@ class AgentState(TypedDict, total=False):
     validation_attempts: int
     validation_feedback: str
     final: str
+    approval: dict
     last_prompt: str
     cost_usd: float
     events: list[dict]
@@ -125,104 +134,109 @@ async def gate_node(state: AgentState, deps: SupervisorDeps) -> dict:
 
 @traceable(name="research_node")
 async def research_node(state: AgentState, deps: SupervisorDeps) -> dict:
-    """Wave 15 가드 + Wave 10b 병렬 + Wave 9 재시도 + Wave 2 Tool/Resource 실호출."""
+    """[After 변경 — Multi-Agent] Supervisor가 설비 조사를 단계별 전문 에이전트에게 나눠 맡긴다.
+
+    - 계측 조사(monitoring) task: 설비의 단계(stage)를 보고 전문 에이전트별로 묶어, 에이전트들을 동시에 실행
+      (각 에이전트 = collect → assess 서브그래프, agent/specialists.py)
+    - 매뉴얼(runbook) task: Before와 같이 MCP Resource를 직접 읽는다
+    Wave 15 가드(실행할 task가 없으면 건너뜀), Wave 9 재시도, Wave 10b 병렬은 그대로 유지."""
     tasks = state["tasks"]
-    research_indices = [i for i, t in enumerate(tasks)
-                        if t["agent"] == "research" and t["status"] == "pending"]
-    # Wave 15 — 객체가 아니라 '실행할 목록'을 검사한다 (not research_agent 버그의 수정판)
-    if not research_indices:
+    pending = [i for i, t in enumerate(tasks) if t["agent"] == "research" and t["status"] == "pending"]
+    if not pending:
         return {"events": state["events"] +
                 [{"type": "ResearchSkipped", "reason": "pending research task 0개"}]}
-
-    retry_total = state.get("retry_count", 0)
-
-    # URI를 코드에 하드코딩하지 않는다. 여러 MCP 서버가 연결돼 있고 그중 어느 서버가
-    # "get_incident_runbook" resource를 제공하는지 모른다고 가정하고, 먼저 연결된
-    # 서버들을 조회(list)해 유효한 서버를 찾은 뒤에만 그 서버로 요청한다.
-    needs_runbook = any(tasks[i]["kind"] != "monitoring" for i in research_indices)
-    runbook_server = runbook_uri_template = None
-    if needs_runbook:
-        runbook_server, runbook_uri_template = await deps.mcp.find_resource_template(
-            "get_incident_runbook")
-
-    async def run_one(idx: int) -> dict:
-        task = tasks[idx]
-        await asyncio.sleep(0.35)   # 태스크당 고정 지연 — 병렬 효과를 실측하기 위함
-        if task["kind"] == "monitoring":
-            data, retries = await with_retry(
-                deps.mcp.call_tool, "get_equipment_status",
-                {"equipment_id": task["target"]})
-            return {"idx": idx, "source": "monitoring", "data": data, "retries": retries}
-        uri = runbook_uri_template.format(incident_type=task["target"])
-        data = await deps.mcp.read_resource(uri, server=runbook_server)
-        return {"idx": idx, "source": "runbook", "data": data, "retries": 0}
-
-    started = time.perf_counter()
-    results = await asyncio.gather(*(run_one(i) for i in research_indices))
-    elapsed = round(time.perf_counter() - started, 2)
 
     new_tasks = [dict(t) for t in tasks]
     collected = list(state.get("collected", []))
     events = list(state["events"])
-    for r in results:
-        new_tasks[r["idx"]]["status"] = "done"
-        collected.append({"source": r["source"], "data": r["data"]})
-        retry_total += r["retries"]
-        events.append({"type": "TaskCompleted", "id": new_tasks[r["idx"]]["id"],
-                       "source": r["source"], "target": new_tasks[r["idx"]]["target"],
-                       "retries": r["retries"]})
+    retry_total = state.get("retry_count", 0)
+    cost = state.get("cost_usd", 0.0)
+    started = time.perf_counter()
+
+    # 1) 계측 조사 → 전문 에이전트별로 묶기
+    groups: dict[str, list[int]] = {}
+    for i in pending:
+        if tasks[i]["kind"] == "monitoring":
+            groups.setdefault(specialist_for(tasks[i]["target"]), []).append(i)
+    runbook_idx = [i for i in pending if tasks[i]["kind"] == "runbook"]
+
+    async def run_specialist(key: str, idxs: list[int]) -> tuple[str, list[int], dict]:
+        sub = build_specialist_graph(deps)
+        out = await sub.ainvoke({"key": key, "name": RULES["specialists"][key]["name"],
+                                 "targets": [tasks[i]["target"] for i in idxs]})
+        return key, idxs, out
+
+    async def read_runbook(i: int) -> tuple[int, str]:
+        await asyncio.sleep(0.35)   # Before와 같은 태스크당 고정 지연(지연시간 비교를 공정하게)
+        server, template = await deps.mcp.find_resource_template("get_incident_runbook")
+        return i, await deps.mcp.read_resource(template.format(incident_type=tasks[i]["target"]),
+                                               server=server)
+
+    spec_results, rb_results = await asyncio.gather(
+        asyncio.gather(*(run_specialist(k, v) for k, v in groups.items())),
+        asyncio.gather(*(read_runbook(i) for i in runbook_idx)))
+    elapsed = round(time.perf_counter() - started, 2)
+
+    for key, idxs, out in spec_results:
+        for i in idxs:
+            new_tasks[i]["status"] = "done"
+        collected.extend(out["collected"])
+        collected.append({"source": "specialist", "data": {
+            "agent": out["name"], "targets": out["targets"], "checks": out["checks"],
+            "suspected": out["suspected"], "summary": out["summary"]}})
+        retry_total += out["retries"]
+        cost = round(cost + out.get("cost_usd", 0.0), 6)
+        for ev, i in zip(out["task_events"], idxs):
+            events.append({**ev, "id": tasks[i]["id"]})
+        events.append({"type": "SpecialistReport", "agent": out["name"], "targets": out["targets"],
+                       "checks": len(out["checks"]), "suspected": out["suspected"]})
+    for i, text in rb_results:
+        new_tasks[i]["status"] = "done"
+        collected.append({"source": "runbook", "data": text, "role": tasks[i].get("role", "primary"),
+                          "incident_type": tasks[i]["target"]})
+        events.append({"type": "TaskCompleted", "id": tasks[i]["id"], "source": "runbook",
+                       "target": tasks[i]["target"], "role": tasks[i].get("role", "primary"),
+                       "retries": 0})
     return {"tasks": new_tasks, "collected": collected, "retry_count": retry_total,
-            "parallel_elapsed": elapsed, "events": events}
+            "parallel_elapsed": elapsed, "cost_usd": cost, "events": events}
 
 
-# 수집된 계측 결과(상태·알람 문구)를 보고 어떤 대응 매뉴얼이 맞는지 고른다. LLM에게
-# 다시 묻는 대신 코드 레벨 규칙으로 판단한다(Base와 같은 방식).
-# [Base 대비 변경] IT 장애 키워드 → 분산에너지 알람 키워드. 순서는 전력 흐름
-# (생산 → 이동 → 저장 → 공급 → 수집)대로 적었다 — 위에서부터 먼저 걸리는 규칙이 이긴다.
-# ⚠️ Before 버전의 알려진 한계: 알람이 여러 개면 '목록 순서'로 결정돼 안전 이슈(셀 과열)가
-#    뒤로 밀릴 수 있고, 질문 문장은 보지 않는다. → After에서 RAG + 우선순위 규칙으로 개선.
-_INCIDENT_TYPE_RULES = [
-    ("출력제어", "curtailment"),
-    ("발전 효율", "pv-underperform"),
-    ("스트링", "pv-underperform"),
-    ("전압", "voltage-rise"),
-    ("최대수요", "peak-demand"),
-    ("충전 상한", "ess-soc-limit"),
-    ("온도", "ess-overheat"),
-    ("방전 하한", "ess-soc-low"),
-    ("감축 요청", "dr-event"),
-    ("응답 없음", "comm-loss"),
-    ("결측", "comm-loss"),
-    ("통신 두절", "comm-loss"),
-]
-_FALLBACK_INCIDENT_TYPE = "peak-demand"   # 아무 규칙도 안 걸리면 가장 흔한 사례로 폴백(Base의 db-down 역할)
-
-
-def _classify_incident_type(collected: list[dict]) -> str:
-    text = " ".join(
-        f"{c['data'].get('status', '')} " + " ".join(c["data"].get("alerts", []))
-        for c in collected if c.get("source") == "monitoring"
-    ).lower()
-    for keyword, incident_type in _INCIDENT_TYPE_RULES:
-        if keyword in text:
-            return incident_type
-    return _FALLBACK_INCIDENT_TYPE
+def _suspected_types(collected: list[dict]) -> list[str]:
+    """전문 에이전트들이 데이터로 확인한 이상 유형을 합쳐 우선순위 순서로."""
+    found = {t for c in collected if c["source"] == "specialist" for t in c["data"]["suspected"]}
+    return [t for t in incident_types_by_priority() if t in found]
 
 
 @traceable(name="replan_check_node")
 async def replan_check_node(state: AgentState, deps: SupervisorDeps) -> dict:
-    """Wave 7 — 1차 수집 결과 평가. runbook이 없으면 gap task만 추가해 재조사."""
+    """Wave 7 — 1차 수집 결과 평가. 매뉴얼이 없으면 gap task를 추가해 재조사.
+
+    [After 변경 — RAG + 우선순위] Before는 알람 문장의 키워드를 목록 순서대로 찾아 매뉴얼 1개를 골랐다.
+    After는 ① MCP Tool search_runbooks로 '질문 의미'에 가까운 매뉴얼을 찾고 ② 전문 에이전트가 데이터로
+    확인한 이상에 가산점을 줘 주 매뉴얼을 정하고 ③ 데이터로 확인된 안전 이슈를 함께 붙인다(agent/selection.py)."""
     has_runbook = any(c["source"] == "runbook" for c in state.get("collected", []))
     rounds = state.get("replan_rounds", 0)
     if has_runbook or rounds >= 1:
         verdict = {"type": "ReplanCheck", "round": rounds, "is_sufficient": True}
         return {"events": state["events"] + [verdict]}
-    incident_type = _classify_incident_type(state.get("collected", []))
-    gap_task = {"id": "task-gap-runbook", "agent": "research", "kind": "runbook",
-                "target": incident_type, "status": "pending"}
+
+    suspected = _suspected_types(state.get("collected", []))
+    found = await deps.mcp.call_tool("search_runbooks",
+                                     {"query": state["query"], "top_k": RULES["rag"]["top_k"]})
+    choice = choose_runbooks(found["hits"], suspected, found["backend"])
+    gap_tasks = []
+    for n, (itype, role) in enumerate([(choice["primary"], "primary")] +
+                                      [(t, "safety") for t in choice["extras"]]):
+        if itype:
+            gap_tasks.append({"id": f"task-gap-runbook-{n}", "agent": "research", "kind": "runbook",
+                              "target": itype, "role": role, "status": "pending"})
     verdict = {"type": "ReplanCheck", "round": rounds, "is_sufficient": False,
-               "gap_task": gap_task["id"], "target": incident_type}
-    return {"tasks": state["tasks"] + [gap_task], "replan_rounds": rounds + 1,
+               "gap_task": gap_tasks[0]["id"] if gap_tasks else None,
+               "target": choice["primary"], "extra": choice["extras"], "method": choice["method"],
+               "embedding": found["backend"],
+               "top": [{"type": r["incident_type"], "score": r["score"], "final": r["final"]}
+                       for r in choice["ranked"]]}
+    return {"tasks": state["tasks"] + gap_tasks, "replan_rounds": rounds + 1,
             "events": state["events"] + [verdict]}
 
 
@@ -269,24 +283,56 @@ async def write_node(state: AgentState, deps: SupervisorDeps) -> dict:
 
 @traceable(name="validate_node")
 async def validate_node(state: AgentState, deps: SupervisorDeps) -> dict:
-    """Wave 8 — 코드 기준 검증: 30자 이상 + 절차 번호 포함이어야 합격."""
+    """Wave 8 — 코드 기준 검증. 기준값은 config/rules.json의 validation.
+
+    [After 변경 — 검수 강화] Before 기준(30자 이상 + '1)' 포함)에 더해, 보고서 속 숫자(kW·%·°C …)가
+    질문·계측값·점검 결과·매뉴얼에 실제로 있는 값인지 확인한다(지어낸 수치 반려)."""
+    cfg = RULES["validation"]
     draft = state["draft"]
     attempts = state.get("validation_attempts", 0) + 1
-    ok = len(draft) >= 30 and "1)" in draft
+    problems = []
+    if len(draft) < cfg["min_length"] or cfg["required_marker"] not in draft:
+        problems.append(f"응답이 너무 짧거나 번호 형식이 없습니다({len(draft)}자, 최소 {cfg['min_length']}자). "
+                        f"1) 2) 3) 번호로 구체적으로 설명하세요.")
+    bad = uncited_numbers(draft, state.get("collected", []), state["query"]) if cfg["check_numbers"] else []
+    if bad:
+        problems.append(f"수집되지 않은 수치가 있습니다: {', '.join(bad)}. 수집된 사실의 숫자만 그대로 인용하세요.")
+    ok = not problems
     verdict = "합격" if ok else "불합격"
-    if not ok and attempts >= 3:   # 실모델 무한 재작성 방지 — 최대 3회 후 통과 처리
+    if not ok and attempts >= cfg["max_attempts"]:   # 무한 재작성 방지 — 최대 시도 후 통과 처리
         ok, verdict = True, "합격(최대 시도 도달 — 통과 처리)"
-    feedback = None if ok else (
-        f"응답이 너무 짧습니다({len(draft)}자, 최소 30자). 절차를 1) 2) 3) 번호로 "
-        f"구체적으로 설명하세요.")
-    event = {"type": "Validation", "attempt": attempts, "verdict": verdict}
-    return {"validation_attempts": attempts, "validation_feedback": feedback,
+    event = {"type": "Validation", "attempt": attempts, "verdict": verdict, "uncited": bad}
+    return {"validation_attempts": attempts, "validation_feedback": None if ok else " ".join(problems),
             "events": state["events"] + [event]}
+
+
+@traceable(name="approval_node")
+async def approval_node(state: AgentState, deps: SupervisorDeps) -> dict:
+    """[After 추가 — HITL] 보고서에 '설비를 움직이는 조치'가 있으면 그래프를 멈추고 운영자 승인을 기다린다.
+
+    LangGraph interrupt()가 여기서 실행을 멈추고, 화면(또는 API)에서 승인/거부를 보내면
+    Command(resume=...)로 이 지점부터 다시 이어진다(멈춘 상태는 checkpointer에 저장)."""
+    if not RULES["approval"]["enabled"]:
+        return {"events": state["events"] + [{"type": "ApprovalSkipped", "reason": "승인 기능 꺼짐"}]}
+    actions = extract_control_actions(state["draft"])
+    if not actions:
+        return {"approval": {"required": False},
+                "events": state["events"] + [{"type": "ApprovalSkipped", "reason": "제어 조치 없음"}]}
+    decision = interrupt({"type": "ApprovalRequired", "actions": actions})
+    approved = (decision or {}).get("decision") == "approve"
+    comment = (decision or {}).get("comment", "")
+    return {"approval": {"required": True, "approved": approved, "actions": actions, "comment": comment},
+            "events": state["events"] + [{"type": "ApprovalResolved", "approved": approved,
+                                          "actions": len(actions)}]}
 
 
 @traceable(name="finalize_node")
 async def finalize_node(state: AgentState, deps: SupervisorDeps) -> dict:
-    return {"final": state["draft"],
+    final = state["draft"]
+    appr = state.get("approval") or {}
+    if appr.get("required"):
+        final += "\n\n" + approval_footer(appr["actions"], appr["approved"], appr.get("comment", ""))
+    return {"final": final,
             "events": state["events"] + [{"type": "Finalize", "pipeline": "incident-v2"}]}
 
 
@@ -300,10 +346,12 @@ def _after_replan_check(state: AgentState) -> str:
 
 
 def _after_validate(state: AgentState) -> str:
-    return "finalize" if state.get("validation_feedback") is None else "write"
+    return "approval" if state.get("validation_feedback") is None else "write"
 
 
-def build_graph(deps: SupervisorDeps):
+def build_graph(deps: SupervisorDeps, checkpointer=None):
+    """[After 변경] 승인 노드(approval) 추가. interrupt()로 멈춘 상태를 저장하려면 checkpointer가 필요해
+    기본으로 메모리 저장소(InMemorySaver)를 붙인다(서버를 재시작하면 대기 중인 승인은 사라짐 — 한계)."""
     g = StateGraph(AgentState)
     node = lambda fn: partial(fn, deps=deps)   # Wave 13 — 명시적 의존성 주입
     g.add_node("route", node(route_node))
@@ -315,6 +363,7 @@ def build_graph(deps: SupervisorDeps):
     g.add_node("analysis", node(analysis_node))
     g.add_node("write", node(write_node))
     g.add_node("validate", node(validate_node))
+    g.add_node("approval", node(approval_node))
     g.add_node("finalize", node(finalize_node))
 
     g.set_entry_point("route")
@@ -329,6 +378,7 @@ def build_graph(deps: SupervisorDeps):
     g.add_edge("analysis", "write")
     g.add_edge("write", "validate")
     g.add_conditional_edges("validate", _after_validate,
-                            {"finalize": "finalize", "write": "write"})
+                            {"approval": "approval", "write": "write"})
+    g.add_edge("approval", "finalize")
     g.add_edge("finalize", END)
-    return g.compile()
+    return g.compile(checkpointer=checkpointer or InMemorySaver())

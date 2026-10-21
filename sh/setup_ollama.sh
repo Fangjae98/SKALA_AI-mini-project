@@ -22,12 +22,13 @@ cd "$(dirname "$0")/.."
 
 FAST_MODEL="${OLLAMA_FAST_MODEL:-qwen3:0.6b}"
 QUALITY_MODEL="${OLLAMA_QUALITY_MODEL:-qwen3:8b}"
+EMBED_MODEL="${OLLAMA_EMBED_MODEL:-bge-m3}"   # [After 추가] RAG 매뉴얼 검색용 임베딩 모델(한국어 지원)
 FORCE_REFRESH="${OLLAMA_FORCE_REFRESH:-0}"
 
 command -v ollama >/dev/null 2>&1 \
     || { echo "ERROR: ollama가 설치되어 있지 않습니다. https://ollama.com 에서 설치 후 재실행하세요."; exit 1; }
 
-echo "대상 모델: fast=$FAST_MODEL / quality=$QUALITY_MODEL"
+echo "대상 모델: fast=$FAST_MODEL / quality=$QUALITY_MODEL / embed=$EMBED_MODEL"
 
 # ── 1) 기존 ollama serve 내리기 ─────────────────────────────────────────
 if curl -s --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
@@ -59,7 +60,7 @@ curl -s --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1 \
 
 # ── 3) 기존 모델 삭제 (OLLAMA_FORCE_REFRESH=1일 때만) ────────────────────
 if [ "$FORCE_REFRESH" = "1" ]; then
-    for m in "$FAST_MODEL" "$QUALITY_MODEL"; do
+    for m in "$FAST_MODEL" "$QUALITY_MODEL" "$EMBED_MODEL"; do
         if ollama list | grep "^${m}" >/dev/null; then
             echo "기존 모델 삭제(OLLAMA_FORCE_REFRESH=1): $m"
             ollama rm "$m"
@@ -68,7 +69,7 @@ if [ "$FORCE_REFRESH" = "1" ]; then
 fi
 
 # ── 4) 없는 모델만 pull (이미 있으면 재사용하고 건너뜀) ───────────────────
-for m in "$FAST_MODEL" "$QUALITY_MODEL"; do
+for m in "$FAST_MODEL" "$QUALITY_MODEL" "$EMBED_MODEL"; do
     if ollama list | grep "^${m}" >/dev/null; then
         echo "이미 받아져 있어 재사용: $m"
         continue

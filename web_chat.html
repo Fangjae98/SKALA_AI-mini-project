@@ -64,6 +64,16 @@
     background: #11111a; color: #c3c3e0; white-space: pre-wrap; word-break: break-word;
     font-family: ui-monospace, "SF Mono", Menlo, monospace; max-height: 320px; overflow-y: auto;
   }
+  .approval-box {
+    max-width: 70%; background: #2a2440; border: 1px solid #8b6bd8; border-radius: 12px;
+    padding: 12px 14px; font-size: 13px; line-height: 1.5;
+  }
+  .approval-title { font-weight: 600; color: #d6c8ff; margin-bottom: 6px; }
+  .approval-box ol { margin: 0 0 10px 18px; padding: 0; }
+  .approval-actions { display: flex; gap: 8px; }
+  .approval-actions button { padding: 7px 16px; font-size: 13px; }
+  .approval-actions button.reject { background: #4a4a68; }
+  .approval-done { color: #9a9ac0; }
   form { display: flex; gap: 8px; padding: 14px 20px; background: #262638; border-top: 1px solid #3a3a52; }
   input {
     flex: 1; padding: 11px 14px; border-radius: 10px; border: 1px solid #3a3a52;
@@ -94,6 +104,15 @@
         <div class="bubble">{{ item.text }}</div>
       </div>
 
+      <div v-else-if="item.kind === 'approval'" class="approval-box">
+        <div class="approval-title">운영자 승인 필요 — 설비를 움직이는 조치 {{ item.actions.length }}건</div>
+        <ol><li v-for="(a, i) in item.actions" :key="i">{{ a }}</li></ol>
+        <div v-if="!item.decided" class="approval-actions">
+          <button @click="decide(item, 'approve')">승인</button>
+          <button class="reject" @click="decide(item, 'reject')">거부</button>
+        </div>
+        <div v-else class="approval-done">{{ item.decided === 'approve' ? '✓ 승인했습니다' : '✕ 거부했습니다' }}</div>
+      </div>
       <details v-else-if="item.kind === 'prompt'" class="prompt-box">
         <summary>LLM에 전달된 최종 프롬프트 보기</summary>
         <pre>{{ item.text }}</pre>
@@ -120,9 +139,15 @@ const STEP_LABELS = {
   TaskCompleted: e => (e.source === 'monitoring'
       ? `설비 계측값 확인 (설비: ${e.target})`
       : `대응 매뉴얼 조회 (이상 유형: ${e.target})`) + (e.retries ? ' (재시도 성공)' : ''),
-  ReplanCheck: e => e.is_sufficient ? null : `정보 부족 → 이상 유형 "${e.target}" 매뉴얼 추가 조사`,
+  SpecialistReport: e => `${e.agent}: 점검 ${e.checks}건${e.suspected?.length ? ` · 의심 이상 ${e.suspected.join(', ')}` : ''}`,
+  ReplanCheck: e => e.is_sufficient ? null
+      : `매뉴얼 선택(${e.method === 'rag' ? 'RAG 의미 검색' : e.method === 'priority' ? '우선순위 규칙' : e.method || '키워드'}): ${e.target}`
+        + (e.extra?.length ? ` + 안전 이슈 ${e.extra.join(', ')}` : ''),
   DraftWritten: e => `답변 초안 작성 (시도 ${e.attempt})`,
-  Validation: e => e.verdict === '합격' ? '검수 통과' : '검수 반려 → 다시 작성',
+  Validation: e => e.verdict === '합격' ? '검수 통과'
+      : e.verdict.startsWith('합격') ? '검수 최대 시도 도달 → 통과 처리'
+      : `검수 반려 → 다시 작성${e.uncited?.length ? ` (근거 없는 수치: ${e.uncited.join(', ')})` : ''}`,
+  ApprovalResolved: e => e.approved ? `운영자 승인 완료 (제어 조치 ${e.actions}건)` : `운영자 거부 (제어 조치 ${e.actions}건 미시행)`,
   Finalize: () => '최종 답변 완성',
 };
 
@@ -145,20 +170,8 @@ createApp({
       if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight;
     }
 
-    function onSubmit() {
-      const text = input.value.trim();
-      if (!text) return;
-
-      log.value.push({ id: nextId++, kind: 'user', text });
-      input.value = '';
-      sending.value = true;
-      scrollToBottom();
-
-      const stepsItem = reactive({ id: nextId++, kind: 'steps', steps: [] });
-      log.value.push(stepsItem);
-      scrollToBottom();
-
-      const url = `/chat/stream?message=${encodeURIComponent(text)}&thread_id=${encodeURIComponent(thread)}`;
+    // SSE 하나를 열어 이벤트를 화면에 그린다. 처음 질문과 승인 후 재개(resume)에 같이 쓴다.
+    function runStream(url, stepsItem, approvalItem) {
       const es = new EventSource(url);
       let streamItem = null;
       let streamAttempt = null;   // write_node 재작성(attempt 증가) 시 새 말풍선으로 끊는다
@@ -179,12 +192,24 @@ createApp({
           return;
         }
 
+        if (e.type === 'ApprovalRequired') {   // [After] 승인 대기 — 버튼을 보여주고 스트림은 여기서 끝남
+          log.value.push(reactive({ id: nextId++, kind: 'approval', actions: e.actions,
+                                    draft: e.draft || '', decided: null, stepsItem }));
+          scrollToBottom();
+          return;
+        }
+
         if (e.type === 'FinalAnswer') {
+          let text = e.reply;
+          // 승인 후 재개된 경우: 초안은 이미 화면에 있으니 승인 결과 문구만 새 말풍선으로
+          if (approvalItem && approvalItem.draft && text.startsWith(approvalItem.draft)) {
+            text = text.slice(approvalItem.draft.length).trim();
+          }
           if (!streamItem) {
             streamItem = reactive({ id: nextId++, kind: 'agent', text: '' });
             log.value.push(streamItem);
           }
-          streamItem.text = e.reply;   // 토큰 합산 결과와 서버의 최종 텍스트를 일치시킨다
+          streamItem.text = text;   // 토큰 합산 결과와 서버의 최종 텍스트를 일치시킨다
           if (e.prompt) log.value.push({ id: nextId++, kind: 'prompt', text: e.prompt });
           streamItem = null;
           streamAttempt = null;
@@ -203,7 +228,31 @@ createApp({
       es.onerror = () => { es.close(); sending.value = false; };
     }
 
-    return { backendLabel, log, input, sending, logEl, onSubmit };
+    function onSubmit() {
+      const text = input.value.trim();
+      if (!text) return;
+
+      log.value.push({ id: nextId++, kind: 'user', text });
+      input.value = '';
+      sending.value = true;
+      scrollToBottom();
+
+      const stepsItem = reactive({ id: nextId++, kind: 'steps', steps: [] });
+      log.value.push(stepsItem);
+      scrollToBottom();
+
+      runStream(`/chat/stream?message=${encodeURIComponent(text)}&thread_id=${encodeURIComponent(thread)}`,
+                stepsItem, null);
+    }
+
+    function decide(item, decision) {   // [After] 승인/거부 버튼
+      item.decided = decision;
+      sending.value = true;
+      runStream(`/chat/resume/stream?thread_id=${encodeURIComponent(thread)}&decision=${decision}`,
+                item.stepsItem, item);
+    }
+
+    return { backendLabel, log, input, sending, logEl, onSubmit, decide };
   },
 }).mount('#app');
 </script>

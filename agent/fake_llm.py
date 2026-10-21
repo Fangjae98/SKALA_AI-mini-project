@@ -8,11 +8,12 @@ import re
 
 from langsmith import traceable
 
+from .config import RULES
 from .equipment import DEFAULT_EQUIPMENT, REFERENCE_EQUIPMENT, describe, find_mentions
 
 # [Base 대비 변경] IT 장애 단어(장애|진단|다운|지연 …) → 분산에너지 이상 단어
-INCIDENT_PATTERN = (r"이상|진단|경보|알람|고장|저하|낮|높|급증|초과|두절|출력제어|피크|"
-                    r"최대수요|감축|과열|온도|방전|충전|전압|원인|대응|안 들어|incident")
+# [After 변경 — 모듈화] 단어 목록을 config/rules.json의 route_keywords에서 읽는다
+INCIDENT_PATTERN = RULES["route_keywords"]["incident_pattern"]
 
 
 class FakeLLM:
@@ -112,19 +113,31 @@ class QualityLLM(FakeLLM):
                 on_token(draft)
             return draft, self._usage(query, draft)
 
+        # [After 변경] 전문 에이전트 점검 결과와 매뉴얼 여러 개(주 매뉴얼 + 안전 매뉴얼)를 반영
         mon = [c for c in collected if c["source"] == "monitoring"]
-        run = [c for c in collected if c["source"] == "runbook"]
-        summary = " · ".join(describe(c["data"]) for c in mon)
-        lines = [f"'{query}' 진단 결과:", f"1) 설비 상태: {summary}"]
-        if run:
-            body_lines = [l.strip() for l in run[0]["data"].strip().splitlines() if l.strip()]
-            title = body_lines[0].lstrip("# ")
-            steps = [m.group(1) for l in body_lines[1:]
-                     if (m := re.match(r"^\d+\.\s+(.*)", l))]
+        runs = [c for c in collected if c["source"] == "runbook"]
+        checks = [chk for c in collected if c["source"] == "specialist" for chk in c["data"]["checks"]]
+        lines = [f"'{query}' 진단 결과:",
+                 f"1) 현재 상태: {' · '.join(describe(c['data']) for c in mon)}",
+                 f"2) 원인 추정: {'; '.join(checks) if checks else '전문 에이전트 점검에서 기준 초과 항목 없음'}"]
+        n = 3
+        ordered = ([c for c in runs if c.get("role") == "safety"] +
+                   [c for c in runs if c.get("role", "primary") != "safety"])
+        for c in ordered:
+            title, steps = _runbook_title_steps(c["data"])
+            label = "우선 안전 조치" if c.get("role") == "safety" else "권장 조치"
             advice = " ".join(steps[1:3]) or "표준 절차를 따라 조치하세요."
-            lines.append(f"2) 표준 절차: '{title}'에 따라 {advice}")
-        lines.append("3) 설비를 움직이는 조치는 운영자 승인 후 시행하고, 정상화 후 원인과 재발 방지 대책을 기록하세요.")
+            lines.append(f"{n}) {label}('{title}'): {advice}")
+            n += 1
+        lines.append(f"{n}) 정상화 확인 후 원인 분석과 재발 방지 대책을 기록하세요.")
         draft = " ".join(lines)
         if on_token is not None:
             on_token(draft)
         return draft, self._usage(query + str(feedback), draft)
+
+
+def _runbook_title_steps(text: str) -> tuple[str, list[str]]:
+    body = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    title = body[0].lstrip("# ")
+    steps = [m.group(1) for l in body[1:] if (m := re.match(r"^\d+\.\s+(.*)", l))]
+    return title, steps

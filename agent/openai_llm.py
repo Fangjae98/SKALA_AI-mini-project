@@ -25,8 +25,10 @@ import re
 import httpx
 from langsmith import traceable
 
-from .equipment import DEFAULT_EQUIPMENT, KNOWN_SYSTEMS as EQUIPMENT_IDS, describe, find_mentions
+from .equipment import DEFAULT_EQUIPMENT, KNOWN_SYSTEMS as EQUIPMENT_IDS, find_mentions
 from .fake_llm import INCIDENT_PATTERN
+from .prompts import (ANALYZE_SYSTEM, CHAT_SYSTEM, ROUTE_SYSTEM, WRITE_SYSTEM,
+                      analyze_facts, plan_system, write_facts)
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -98,12 +100,7 @@ class OpenAIFastLLM(OpenAILLM):
 
     @traceable(run_type="llm", name="openai_fast.route")
     def route(self, query: str) -> tuple[dict, dict]:
-        system = ("당신은 분산에너지(태양광·ESS·연계점·EV충전기 등) 운영 지원 라우터다. "
-                  "사용자 요청을 분류하라. 설비 이상·출력 저하·피크·전압·충전율·과열·"
-                  "통신 두절·출력제어·수요반응(DR) 등 운영 이슈면 route=incident, "
-                  "인사·잡담·일반 질문이면 route=chat. "
-                  "needs_analysis는 패턴 비교/통계 분석이 꼭 필요할 때만 true. "
-                  + ROUTE_INSTRUCTIONS)
+        system = ROUTE_SYSTEM + " " + ROUTE_INSTRUCTIONS   # [After] prompts.py로 이동
         content, usage = self._chat(system, query, json_mode=True)
         try:
             raw = json.loads(content)
@@ -120,15 +117,7 @@ class OpenAIFastLLM(OpenAILLM):
 
     @traceable(run_type="llm", name="openai_fast.plan")
     def plan(self, query: str, procedure_prompt: str) -> tuple[dict, dict]:
-        system = ("당신은 분산에너지 운영 Supervisor의 planning 노드다. 표준 진단 절차에 따라 "
-                  "실행 계획(tasks)을 JSON으로 세워라. "
-                  "사용자 요청에 등장한 설비마다 agent=research task를 하나씩 세우고, "
-                  "target에는 반드시 설비 ID를 넣어라 "
-                  f"(알려진 설비 ID: {', '.join(sorted(KNOWN_SYSTEMS))} — 예: 태양광 2호기=pv-02, "
-                  "ESS 1호기=ess-01, 변압기=tr-01, 연계점=pcc-01. 특정 설비가 언급되지 "
-                  "않았으면 pcc-01을 기본으로 조사하라). "
-                  "패턴 분석이 꼭 필요하다고 판단되면 agent=analysis task를 추가해도 된다. "
-                  + PLAN_INSTRUCTIONS)
+        system = plan_system(sorted(KNOWN_SYSTEMS)) + " " + PLAN_INSTRUCTIONS   # [After] prompts.py로 이동
         user = f"## 표준 절차\n{procedure_prompt}\n\n## 사용자 요청\n{query}"
         content, usage = self._chat(system, user, json_mode=True)
 
@@ -170,12 +159,8 @@ class OpenAIFastLLM(OpenAILLM):
 
     @traceable(run_type="llm", name="openai_fast.analyze")
     def analyze(self, collected: list[dict]) -> tuple[str, dict]:
-        system = ("당신은 분산에너지 운영 분석가다. 여러 설비의 계측 결과를 비교해 "
-                  "생산·이동·저장·공급 단계 사이의 연쇄 영향이나 공통 원인이 있는지 "
-                  "한두 문장으로 짧게 답하라. "
-                  "패턴이 없으면 '특이 패턴 없음'이라고만 답하라.")
-        mon = [c["data"] for c in collected if c["source"] == "monitoring"]
-        facts = "\n".join(f"- {describe(d)}" for d in mon) or "(계측 데이터 없음)"
+        system = ANALYZE_SYSTEM   # [After] prompts.py로 이동
+        facts = analyze_facts(collected)
         return self._chat(system, facts)
 
     @traceable(run_type="llm", name="openai_fast.chat")
@@ -183,8 +168,7 @@ class OpenAIFastLLM(OpenAILLM):
         """ollama_llm.py와 인터페이스(on_token 콜백)만 맞춘다 — OpenAI Chat Completions를
         아직 stream=True로 호출하지 않아 토큰 단위 중계는 하지 않고 완성된 응답을 한 번에
         전달한다."""
-        system = ("당신은 분산에너지 단지 운영을 돕는 간결한 한국어 비서다. 한두 문장으로 답하라. "
-                  "대화 이력에서 사용자가 밝힌 이름이 있으면 정확히 기억해 답하라.")
+        system = CHAT_SYSTEM   # [After] prompts.py로 이동
         rendered = "\n".join(f"{m['role']}: {m['content']}" for m in history[-10:])
         user = (f"## 지금까지의 대화\n{rendered or '(없음)'}\n\n"
                 f"## 사용자의 새 메시지\n{query}")
@@ -204,20 +188,8 @@ class OpenAIQualityLLM(OpenAILLM):
         """ollama_llm.py와 인터페이스(on_token 콜백)만 맞춘다 — OpenAI Chat Completions를
         아직 stream=True로 호출하지 않아 토큰 단위 중계는 하지 않고 완성된 응답을 한 번에
         전달한다."""
-        system = ("당신은 분산에너지 운영 보고 작성자다. 수집된 사실만 사용해 한국어로 "
-                  "간결한 대응 보고를 작성하라. 반드시 '1) 현재 상태 2) 원인 추정 "
-                  "3) 권장 조치' 형식의 번호로 답하고, 수치는 수집된 값을 단위까지 그대로 "
-                  "인용하라. 설비를 움직이는 조치(충방전·출력 제한·부하 차단 등)에는 "
-                  "'(운영자 승인 필요)'를 붙여라.")
-        facts = []
-        for c in collected:
-            if c["source"] == "monitoring":
-                facts.append(f"- 설비 계측 {describe(c['data'])}")
-            elif c["source"] == "runbook":
-                facts.append(f"- 대응 매뉴얼 발췌:\n{c['data'].strip()}")
-            elif c["source"] == "analysis":
-                facts.append(f"- 연쇄 분석: {c['data'].strip()}")
-        user = f"## 사용자 요청\n{query}\n\n## 수집된 사실\n" + "\n".join(facts)
+        system = WRITE_SYSTEM   # [After] prompts.py로 이동
+        user = f"## 사용자 요청\n{query}\n\n## 수집된 사실\n" + write_facts(collected)
         if feedback:
             user += f"\n\n## 이전 초안에 대한 검증 반려 사유 (반드시 반영)\n{feedback}"
         content, usage = self._chat(system, user)

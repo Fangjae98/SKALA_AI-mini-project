@@ -8,54 +8,15 @@ Base에서는 서버 이름(auth-service 등)을 영어 ID로만 찾았다. 분�
 import json
 from pathlib import Path
 
+from .config import RULES
+
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "monitoring.json"
 
-# 설비를 하나도 못 찾았을 때 기본으로 조사할 설비 — 단지 전체 전력이 지나가는 연계점
-DEFAULT_EQUIPMENT = "pcc-01"
-# fake 백엔드가 비교용으로 항상 함께 조회하는 설비(Base의 web-01 역할) — 정상 상태인 단지 부하
-REFERENCE_EQUIPMENT = "load-01"
-
-# 여러 설비를 한 번에 가리키는 묶음 별칭 — 같은 묶음의 개별 설비가 이미 언급됐으면 쓰지 않는다
-GROUP_ALIASES = {
-    "태양광": ["pv-01", "pv-02"],
-    "pv": ["pv-01", "pv-02"],
-    "발전": ["pv-01", "pv-02"],
-    "출력제어": ["pv-01", "pv-02"],
-    "ess": ["ess-01", "ess-02"],
-    "배터리": ["ess-01", "ess-02"],
-    "저장장치": ["ess-01", "ess-02"],
-}
-
-# 측정값 키 → (한국어 이름, 단위)
-METRIC_LABELS = {
-    "output_kw": ("출력", "kW"),
-    "capacity_kw": ("설비용량", "kW"),
-    "irradiance_wm2": ("일사량", "W/m²"),
-    "pr_percent": ("발전 효율(PR)", "%"),
-    "import_kw": ("수전", "kW"),
-    "export_kw": ("역송", "kW"),
-    "contract_kw": ("계약전력", "kW"),
-    "today_peak_kw": ("오늘 15분 최대수요", "kW"),
-    "load_ratio_percent": ("부하율", "%"),
-    "bus_voltage_v": ("모선 전압", "V"),
-    "rated_voltage_v": ("정격 전압", "V"),
-    "capacity_kwh": ("용량", "kWh"),
-    "soc_percent": ("충전율(SOC)", "%"),
-    "soc_upper_limit": ("충전 상한", "%"),
-    "soc_lower_limit": ("방전 하한", "%"),
-    "charge_kw": ("충전", "kW"),
-    "discharge_kw": ("방전", "kW"),
-    "cell_temp_max_c": ("셀 최고온도", "°C"),
-    "demand_kw": ("부하", "kW"),
-    "charging_kw": ("충전 전력", "kW"),
-    "ports_in_use": ("사용 중 충전구", "개"),
-    "ports_total": ("전체 충전구", "개"),
-    "data_age_min": ("데이터 경과", "분"),
-    "connected_devices": ("연결 설비", "대"),
-    "total_devices": ("전체 설비", "대"),
-    "last_data_min_ago": ("마지막 수신 경과", "분"),
-    "missing_rate_percent": ("결측률", "%"),
-}
+# [After 변경 — 모듈화] 아래 값들은 config/rules.json에서 읽는다(Before에서는 이 파일에 직접 적혀 있었음).
+DEFAULT_EQUIPMENT = RULES["equipment"]["default"]
+REFERENCE_EQUIPMENT = RULES["equipment"]["reference_for_fake"]
+GROUP_ALIASES = RULES["equipment"]["group_aliases"]
+METRIC_LABELS = {k: tuple(v) for k, v in RULES["metric_labels"].items()}
 
 
 def load_equipment() -> dict:
@@ -83,6 +44,7 @@ def find_mentions(query: str) -> list[str]:
         if positions:
             found[eq_id] = min(positions)
     for alias, members in GROUP_ALIASES.items():
+        alias = alias.lower()
         if alias in q and not any(m in found for m in members):
             for m in members:
                 if m in EQUIPMENT:
@@ -104,3 +66,7 @@ def describe(status: dict) -> str:
     return (f"{status['equipment_id']}({status.get('name', '')}, {status.get('stage', '')} 단계): "
             f"상태={status['status']}, {format_metrics(status.get('metrics', {}))}, "
             f"알람 {len(status.get('alerts', []))}건 {status.get('alerts', [])}")
+
+
+def stage_of(equipment_id: str) -> str:
+    return EQUIPMENT.get(equipment_id, {}).get("stage", "")

@@ -1,0 +1,121 @@
+{
+  "_설명": "분산에너지 운영 에이전트의 판단 기준을 한 곳에 모은 설정 파일. 코드를 고치지 않고 이 파일의 값만 바꿔 동작을 조정한다. 바꾼 뒤에는 python3 -m pytest 와 python3 eval/run_regression.py --label after 로 다시 확인할 것. '_설명'으로 시작하는 항목은 사람용 메모라 코드가 읽지 않는다.",
+
+  "equipment": {
+    "_설명": "default: 질문에서 설비를 못 찾았을 때 조사할 설비. reference_for_fake: fake 두뇌가 비교용으로 항상 함께 조회하는 정상 설비. group_aliases: 여러 설비를 한 번에 가리키는 단어(같은 묶음의 개별 설비가 이미 언급되면 무시).",
+    "default": "pcc-01",
+    "reference_for_fake": "load-01",
+    "group_aliases": {
+      "태양광": ["pv-01", "pv-02"],
+      "pv": ["pv-01", "pv-02"],
+      "발전": ["pv-01", "pv-02"],
+      "출력제어": ["pv-01", "pv-02"],
+      "ess": ["ess-01", "ess-02"],
+      "배터리": ["ess-01", "ess-02"],
+      "저장장치": ["ess-01", "ess-02"]
+    }
+  },
+
+  "route_keywords": {
+    "_설명": "fake 두뇌의 이상/잡담 분류, 그리고 실제 LLM 응답이 깨졌을 때의 비상 분류에 쓰는 단어(| 로 구분).",
+    "incident_pattern": "이상|진단|경보|알람|고장|저하|낮|높|급증|초과|두절|출력제어|피크|최대수요|감축|과열|온도|방전|충전|전압|원인|대응|안 들어|incident"
+  },
+
+  "thresholds": {
+    "_설명": "전문 에이전트가 계측값을 직접 점검할 때 쓰는 기준. [가정]은 근거 없이 정한 값이라 현장 기준으로 바꿀 것. ESS 충전 상한은 설비별 soc_upper_limit(옥내 80%·옥외 90%, 2020 ESS 안전대책)을 그대로 쓴다.",
+    "pv_pr_min_percent": 75,
+    "voltage_rise_max_percent": 5,
+    "peak_warn_ratio_percent": 90,
+    "ess_cell_temp_alarm_c": 45,
+    "data_stale_min": 15,
+    "missing_rate_max_percent": 5,
+    "power_balance_tolerance_kw": 5
+  },
+
+  "incident_types": {
+    "_설명": "priority: 숫자가 작을수록 먼저(안전 > 데이터 신뢰 > 계통 > 비용 > 효율). safety: true면 질문이 다른 걸 물어도 함께 안내하는 안전 이슈. alert_keywords: 알람 문구에 이 단어가 있으면 해당 이상으로 본다.",
+    "ess-overheat":    {"stage": "저장", "priority": 1, "safety": true,  "alert_keywords": ["온도", "과열"]},
+    "ess-soc-limit":   {"stage": "저장", "priority": 2, "safety": true,  "alert_keywords": ["충전 상한"]},
+    "comm-loss":       {"stage": "수집", "priority": 3, "safety": false, "alert_keywords": ["응답 없음", "결측", "통신 두절"]},
+    "voltage-rise":    {"stage": "이동", "priority": 4, "safety": false, "alert_keywords": ["전압"]},
+    "peak-demand":     {"stage": "이동", "priority": 5, "safety": false, "alert_keywords": ["최대수요"]},
+    "dr-event":        {"stage": "공급", "priority": 6, "safety": false, "alert_keywords": ["감축 요청"]},
+    "ess-soc-low":     {"stage": "공급", "priority": 7, "safety": false, "alert_keywords": ["방전 하한"]},
+    "curtailment":     {"stage": "생산", "priority": 8, "safety": false, "alert_keywords": ["출력제어"]},
+    "pv-underperform": {"stage": "생산", "priority": 9, "safety": false, "alert_keywords": ["발전 효율", "스트링"]}
+  },
+
+  "rag": {
+    "_설명": "매뉴얼 검색(RAG). embedding_backend가 auto면 LLM_BACKEND를 따른다(fake→tfidf, ollama→ollama, openai→openai). 최종 점수 = 질문 의미 점수 + (전문 에이전트가 데이터로 확인한 이상이면 evidence_bonus). 단, 의미 점수가 evidence_min_score 이상인 매뉴얼에만 가산점을 준다(질문과 무관한 매뉴얼이 데이터 근거만으로 뽑히지 않게). 최종 점수가 min_score보다 낮으면 질문 의도가 불분명하다고 보고 알람 우선순위로 고른다. ollama·openai 값은 [가정] — 실제 측정 후 조정 필요. max_runbooks: 주 매뉴얼 + 안전 매뉴얼 최대 개수.",
+    "embedding_backend": "auto",
+    "ollama_model": "bge-m3",
+    "openai_model": "text-embedding-3-small",
+    "top_k": 9,
+    "min_score": {"tfidf": 0.08, "ollama": 0.45, "openai": 0.3},
+    "evidence_bonus": 0.15,
+    "evidence_min_score": {"tfidf": 0.03, "ollama": 0.35, "openai": 0.2},
+    "max_runbooks": 2
+  },
+
+  "specialists": {
+    "_설명": "Multi-Agent 구성. 설비의 stage(단계)를 보고 어느 전문 에이전트가 맡을지 정한다.",
+    "data":       {"name": "데이터 수집 에이전트", "stages": ["수집"]},
+    "generation": {"name": "발전 에이전트",       "stages": ["생산"]},
+    "grid":       {"name": "계통 에이전트",       "stages": ["이동"]},
+    "storage":    {"name": "저장·공급 에이전트",  "stages": ["저장", "공급"]}
+  },
+
+  "approval": {
+    "_설명": "사람 승인(HITL). 보고서 문장에 marker가 있거나 action_phrases 중 하나라도 있으면 '설비를 움직이는 조치'로 보고 운영자 승인을 받는다.",
+    "enabled": true,
+    "marker": "(운영자 승인 필요)",
+    "action_phrases": ["충전을 중지", "충방전을 중지", "방전을 중지", "충방전 중지", "충전 중지", "방전 중지",
+                       "부하 차단", "부하를 차단", "출력 제한", "출력을 제한", "제한값", "재기동", "계통에서 분리",
+                       "방전 계획", "충전 계획", "감축 계획", "출력 조정", "전압 억제"]
+  },
+
+  "validation": {
+    "_설명": "보고서 검수 기준. check_numbers가 true면 보고서 속 숫자(kW, %, °C 등)가 실제로 수집된 값인지 확인한다.",
+    "min_length": 30,
+    "required_marker": "1)",
+    "max_attempts": 3,
+    "check_numbers": true
+  },
+
+  "metric_labels": {
+    "_설명": "계측값 키 → [한국어 이름, 단위]",
+    "output_kw": ["출력", "kW"],
+    "capacity_kw": ["설비용량", "kW"],
+    "irradiance_wm2": ["일사량", "W/m²"],
+    "pr_percent": ["발전 효율(PR)", "%"],
+    "import_kw": ["수전", "kW"],
+    "export_kw": ["역송", "kW"],
+    "contract_kw": ["계약전력", "kW"],
+    "today_peak_kw": ["오늘 15분 최대수요", "kW"],
+    "load_ratio_percent": ["부하율", "%"],
+    "bus_voltage_v": ["모선 전압", "V"],
+    "rated_voltage_v": ["정격 전압", "V"],
+    "capacity_kwh": ["용량", "kWh"],
+    "soc_percent": ["충전율(SOC)", "%"],
+    "soc_upper_limit": ["충전 상한", "%"],
+    "soc_lower_limit": ["방전 하한", "%"],
+    "charge_kw": ["충전", "kW"],
+    "discharge_kw": ["방전", "kW"],
+    "cell_temp_max_c": ["셀 최고온도", "°C"],
+    "demand_kw": ["부하", "kW"],
+    "charging_kw": ["충전 전력", "kW"],
+    "ports_in_use": ["사용 중 충전구", "개"],
+    "ports_total": ["전체 충전구", "개"],
+    "data_age_min": ["데이터 경과", "분"],
+    "connected_devices": ["연결 설비", "대"],
+    "total_devices": ["전체 설비", "대"],
+    "last_data_min_ago": ["마지막 수신 경과", "분"],
+    "missing_rate_percent": ["결측률", "%"]
+  },
+
+  "power_balance": {
+    "_설명": "전력 수지 계산에 쓰는 계측값. supply(들어오는 전력) 합 = demand(나가는 전력) 합 이어야 한다.",
+    "supply_metrics": ["output_kw", "discharge_kw", "import_kw"],
+    "demand_metrics": ["demand_kw", "charging_kw", "charge_kw", "export_kw"]
+  }
+}

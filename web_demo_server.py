@@ -60,6 +60,30 @@ async def proxy_stream(message: str, thread_id: str = "web-demo"):
     return StreamingResponse(relay(), media_type="text/event-stream")
 
 
+# [After 추가 — HITL] 승인/거부 결과를 백엔드로 중계
+@app.post("/chat/resume")
+async def proxy_resume(req: Request):
+    body = await req.body()
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.post(f"{BACKEND}/chat/resume", content=body,
+                              headers={"content-type": "application/json"})
+    return JSONResponse(r.json(), status_code=r.status_code)
+
+
+@app.get("/chat/resume/stream")
+async def proxy_resume_stream(thread_id: str, decision: str = "approve", comment: str = ""):
+    async def relay():
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "GET", f"{BACKEND}/chat/resume/stream",
+                params={"thread_id": thread_id, "decision": decision, "comment": comment},
+            ) as upstream:
+                async for chunk in upstream.aiter_bytes():
+                    yield chunk
+
+    return StreamingResponse(relay(), media_type="text/event-stream")
+
+
 if __name__ == "__main__":
     print("브라우저에서 http://localhost:8600 을 열어보세요 (server.py가 8100에 떠 있어야 합니다)")
     uvicorn.run(app, host="0.0.0.0", port=8600)

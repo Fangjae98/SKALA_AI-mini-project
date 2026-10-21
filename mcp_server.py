@@ -7,6 +7,8 @@ FastAPI 백엔드(server.py)가 lifespan에서 이 파일을 subprocess(stdio)�
 - Tool     get_equipment_status : 설비 1대의 현재 계측값과 알람 조회
 - Resource runbook://der-response/{incident_type} : 이상 유형별 대응 매뉴얼(정적 문서)
 - Prompt   incident_analysis_prompt : 분산에너지 이상 진단 표준 절차
+- [After 추가] Tool search_runbooks  : 질문과 의미가 가까운 대응 매뉴얼 검색(RAG)
+- [After 추가] Tool get_power_balance : 단지 전체 전력 수지(공급 합 = 수요 합) 계산
 
 [Base 대비 변경] 서버 CPU/메모리 2칸 고정 → 설비별 metrics 묶음, 서버 이름 → 설비 ID,
 runbook URI runbook://incident-response/ → runbook://der-response/,
@@ -20,6 +22,9 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
+
+from agent.config import RULES, embedding_backend
+from agent.rag import RunbookIndex
 
 mcp = FastMCP(name="der-ops-agent-ops")
 
@@ -65,6 +70,37 @@ def get_incident_runbook(incident_type: str) -> str:
     if not runbook_path.exists():
         return f"# Runbook Not Found\n\nNo runbook for incident type: {incident_type}"
     return runbook_path.read_text()
+
+
+_RUNBOOK_INDEX: RunbookIndex | None = None   # 첫 검색 때 한 번만 만들고 재사용(매뉴얼 임베딩 비용 절약)
+
+
+@mcp.tool()
+def search_runbooks(query: str, top_k: int = 3) -> dict:
+    """[After 추가 — RAG] 질문과 의미가 가장 가까운 대응 매뉴얼을 점수 순으로 돌려줍니다."""
+    global _RUNBOOK_INDEX
+    if _RUNBOOK_INDEX is None:
+        _RUNBOOK_INDEX = RunbookIndex()
+    return {"backend": embedding_backend(), "hits": _RUNBOOK_INDEX.search(query, top_k)}
+
+
+@mcp.tool()
+def get_power_balance() -> dict:
+    """[After 추가] 단지 전체 전력 수지를 계산합니다. 공급(발전·방전·수전) 합과 수요(부하·충전·역송) 합이
+    같아야 정상이며, 차이가 크면 계측 누락이나 오류를 의심합니다."""
+    equipment = json.loads((DATA_DIR / "monitoring.json").read_text())
+    pb = RULES["power_balance"]
+    supply, demand = [], []
+    for eq_id, data in equipment.items():
+        for key, value in data.get("metrics", {}).items():
+            if key in pb["supply_metrics"] and value:
+                supply.append({"equipment_id": eq_id, "metric": key, "kw": value})
+            elif key in pb["demand_metrics"] and value:
+                demand.append({"equipment_id": eq_id, "metric": key, "kw": value})
+    supply_kw = sum(x["kw"] for x in supply)
+    demand_kw = sum(x["kw"] for x in demand)
+    return {"supply_kw": supply_kw, "demand_kw": demand_kw, "imbalance_kw": supply_kw - demand_kw,
+            "supply": supply, "demand": demand}
 
 
 @mcp.prompt()

@@ -16,21 +16,220 @@
     }
   },
 
+  "intent": {
+    "_설명": "질문 3분류(agent/intent.py). 잡담 중 인사·도움말·매뉴얼 목록과 설비 조회는 AI 없이 코드가 데이터로 답한다. symptom_pattern(증상 단어)이 있으면 무조건 이상 대응 쪽으로 본다. 규칙에 안 걸리는 질문만 AI가 분류한다.",
+    "symptom_pattern": "과열|올라|오르|높|낮|초과|넘었|넘어|두절|안 들어|안들어|경보|알람|고장|이상해|이상이|저하|급증|감축|줄여|출력제어|피크|방전됐|바닥|불안정|찍혀|0A|원인|어떻게 대응|어떻게 해|지시|결측|떨어|멈췄|꺼졌|꺼져|꺼짐|연기|냄새|불꽃|화재|타는|뜨거|튀어|튀는|편차|끊겼|끊겨|끊어|고정돼|고정되|상충|트립|정전|오류 코드|에러 코드|먼지|흐려|몰려|안 따라|가득|모자|못 채|해제됐|잘못된|안 돼",
+    "manual_list_pattern": "(매뉴얼|메뉴얼|런북|runbook|대응 절차)[^.?!]*(목록|종류|뭐|무엇|어떤|있|알려|설명|확인 가능)|(어떤|무슨) (매뉴얼|메뉴얼|대응 절차)",
+    "help_pattern": "뭘 할 수|무엇을 할 수|뭐 할 수|뭘 도와|무엇을 도와|할 수 있는 (게|것|일)|기능이 뭐|사용법|어떻게 써|도움말|너는 누구|넌 누구|소개해",
+    "greeting_pattern": "^(안녕|하이|헬로|hi|hello|반가|고마|감사|ㅎㅇ|좋은 아침)",
+    "greeting_max_len": 20,
+    "equipment_query_pattern": "(설비|장비|기기)[^.?!]*(목록|종류|뭐|무엇|어떤|있|알려|보여)|연결된|(상태|현황|계측값)[^.?!]*(알려|보여|확인|어때|어떤|어떻)|전체 (상태|현황)"
+  },
+
   "route_keywords": {
     "_설명": "fake 두뇌의 이상/잡담 분류, 그리고 실제 LLM 응답이 깨졌을 때의 비상 분류에 쓰는 단어(| 로 구분).",
     "incident_pattern": "이상|진단|경보|알람|고장|저하|낮|높|급증|초과|두절|출력제어|피크|최대수요|감축|과열|온도|방전|충전|전압|원인|대응|안 들어|incident"
   },
 
   "thresholds": {
-    "_설명": "전문 에이전트가 계측값을 직접 점검할 때 쓰는 기준. [가정]은 근거 없이 정한 값이라 현장 기준으로 바꿀 것. ESS 충전 상한은 설비별 soc_upper_limit(옥내 80%·옥외 90%, 2020 ESS 안전대책)을 그대로 쓴다.",
-    "pv_pr_min_percent": 75,
-    "voltage_rise_max_percent": 5,
-    "peak_warn_ratio_percent": 90,
-    "ess_cell_temp_alarm_c": 45,
-    "data_stale_min": 15,
-    "missing_rate_max_percent": 5,
+    "_설명": "전문 에이전트가 쓰는 기타 기준. 설비별 상태 판단 기준은 status_criteria로 옮겼다.",
     "power_balance_tolerance_kw": 5
   },
+
+  "status_criteria": {
+    "_설명": "설비별 상태 판단 기준(agent/diagnosis.py). 설비 종류 = 설비 ID 앞부분. 항목마다 warn(주의)·alarm(경보) 기준, direction(high: 이 값 이상이면 / low: 이 값 이하이면), strict(true면 '초과/미만'). 경보가 하나라도 있으면 설비 상태 '이상', 주의만 있으면 '주의'. incident: 주의·경보일 때 의심하는 이상 유형(매뉴얼 이름). requires: 판정에 필요한 보조 조건(안 맞으면 판정 보류). check: 전문 에이전트 점검 문장, alert: 알람 문장, meaning: 문제점 분석 문장, rule: 화면에 보여 줄 기준 설명. [가정]은 근거 없이 정한 값이므로 현장 기준으로 바꿀 것.",
+    "gw": [
+      {
+        "metric": "connected_ratio_percent",
+        "label": "연결률",
+        "unit": "%",
+        "direction": "low",
+        "strict": true,
+        "warn": 100,
+        "alarm": 90,
+        "incident": "comm-loss",
+        "check": "{eq} 연결 설비 {connected_devices}/{total_devices}대 (미수신 {missing_devices}대)",
+        "alert": "연결 설비 {connected_devices}/{total_devices}대 — {missing_devices}대 데이터 미수신",
+        "meaning": "게이트웨이에 연결된 설비 중 {missing_devices}대의 데이터가 들어오지 않습니다 → 해당 설비 통신 경로(배선·주소·신호) 이상 의심",
+        "rule": "100% 미만 주의, 90% 미만 경보 [가정]"
+      },
+      {
+        "metric": "missing_rate_percent",
+        "label": "결측률",
+        "unit": "%",
+        "direction": "high",
+        "warn": 2,
+        "alarm": 5,
+        "incident": "comm-loss",
+        "check": "{eq} 결측률 {v}% ≥ 기준 {limit}%",
+        "alert": "데이터 결측률 {v}% ({level} 기준 {limit}% 이상)",
+        "meaning": "수집 데이터의 {v}%가 비어 있습니다 → 이 데이터를 쓰는 판단(전력 수지·피크 등)의 신뢰도가 떨어집니다",
+        "rule": "2% 이상 주의, 5% 이상 경보 [가정]"
+      },
+      {
+        "metric": "last_data_min_ago",
+        "label": "마지막 수신 경과",
+        "unit": "분",
+        "direction": "high",
+        "warn": 5,
+        "alarm": 15,
+        "incident": "comm-loss",
+        "check": "{eq} 데이터 {v}분 경과 ≥ 기준 {limit}분",
+        "alert": "마지막 수신 {v}분 전 ({level} 기준 {limit}분 이상)",
+        "meaning": "게이트웨이 자체가 {v}분째 데이터를 보내지 않습니다 → 게이트웨이 전원·네트워크 이상 의심",
+        "rule": "5분 이상 주의, 15분 이상 경보 [가정]"
+      }
+    ],
+    "pv": [
+      {
+        "metric": "pr_percent",
+        "label": "발전 효율(PR)",
+        "unit": "%",
+        "direction": "low",
+        "strict": true,
+        "warn": 75,
+        "alarm": 60,
+        "incident": "pv-underperform",
+        "requires": {
+          "metric": "irradiance_wm2",
+          "min": 300,
+          "reason": "일사량 {irradiance_wm2}W/m²로 낮아 발전 효율을 판정하지 않음(날씨 영향)"
+        },
+        "check": "{eq} 발전 효율 {v}% < 기준 {limit}%",
+        "alert": "발전 효율(PR) {v}% ({level} 기준 {limit}% 미만)",
+        "meaning": "일사량 {irradiance_wm2}W/m²로 햇빛은 충분한데 발전 효율이 {v}%입니다 → 날씨가 아니라 설비(스트링·인버터·패널) 문제 의심",
+        "rule": "75% 미만 주의, 60% 미만 경보 (일사량 300W/m² 이상일 때만 판정) [가정]"
+      },
+      {
+        "metric": "zero_current_strings",
+        "label": "전류 0A 스트링",
+        "unit": "개",
+        "direction": "high",
+        "warn": 1,
+        "alarm": 1,
+        "incident": "pv-underperform",
+        "check": "{eq} 전류 0A 스트링 {v}개 (전체 {string_count}개)",
+        "alert": "스트링 {v}개 전류 0A (전체 {string_count}개 중)",
+        "meaning": "스트링 {v}개에서 전류가 흐르지 않습니다 → 퓨즈 단선·커넥터 불량 의심 (발전량 약 {v}/{string_count} 손실)",
+        "rule": "1개 이상이면 경보"
+      }
+    ],
+    "pcc": [
+      {
+        "metric": "peak_ratio_percent",
+        "label": "최대수요/계약전력",
+        "unit": "%",
+        "direction": "high",
+        "warn": 80,
+        "alarm": 90,
+        "incident": "peak-demand",
+        "check": "{eq} 오늘 최대수요 {today_peak_kw}kW = 계약전력 {contract_kw}kW의 {v}%",
+        "alert": "오늘 최대수요 {today_peak_kw}kW (계약전력의 {v}%, {level} 기준 {limit}% 이상)",
+        "meaning": "최대수요가 계약전력의 {v}%까지 올라왔습니다 → 넘으면 초과 요금·설비 과부하 위험",
+        "rule": "80% 이상 주의, 90% 이상 경보 [가정]"
+      },
+      {
+        "metric": "export_kw",
+        "label": "역송",
+        "unit": "kW",
+        "info_when_positive": true,
+        "check": "{eq} 역송 {v}kW 발생",
+        "meaning": "남는 전력 {v}kW가 계통으로 나가고 있습니다(출력제어 지시가 있으면 제한 대상)"
+      }
+    ],
+    "tr": [
+      {
+        "metric": "voltage_rise_percent",
+        "label": "전압 상승률",
+        "unit": "%",
+        "direction": "high",
+        "strict": true,
+        "warn": 5,
+        "alarm": 8,
+        "incident": "voltage-rise",
+        "check": "{eq} 모선 전압 {bus_voltage_v}V = 정격 {rated_voltage_v}V 대비 +{v}%",
+        "alert": "저압 모선 전압 {bus_voltage_v}V (정격 대비 +{v}%, {level} 기준 +{limit}% 초과)",
+        "meaning": "모선 전압이 정격보다 {v}% 높습니다 → 역송·변압기 탭·인버터 역률 설정 확인 필요",
+        "rule": "+5% 초과 주의, +8% 초과 경보 [가정]"
+      },
+      {
+        "metric": "load_ratio_percent",
+        "label": "부하율",
+        "unit": "%",
+        "direction": "high",
+        "warn": 80,
+        "alarm": 100,
+        "incident": null,
+        "check": "{eq} 부하율 {v}% ≥ 기준 {limit}%",
+        "alert": "변압기 부하율 {v}% ({level} 기준 {limit}% 이상)",
+        "meaning": "변압기 부하율이 {v}%로 높습니다 → 과열·수명 단축 위험",
+        "rule": "80% 이상 주의, 100% 이상 경보 [가정]"
+      }
+    ],
+    "ess": [
+      {
+        "metric": "cell_temp_max_c",
+        "label": "셀 최고온도",
+        "unit": "°C",
+        "direction": "high",
+        "warn": 40,
+        "alarm": 45,
+        "incident": "ess-overheat",
+        "check": "{eq} 셀 최고온도 {v}°C ≥ 경보 {limit}°C",
+        "warn_check": "{eq} 셀 최고온도 {v}°C ≥ 주의 {limit}°C",
+        "alert": "셀 최고온도 {v}°C ({level} 기준 {limit}°C 이상)",
+        "meaning": "배터리 셀 온도가 {v}°C입니다 → 화재 위험과 직결되는 최우선 안전 이슈",
+        "rule": "40°C 이상 주의, 45°C 이상 경보 [가정]"
+      },
+      {
+        "metric": "soc_upper_margin",
+        "label": "충전 상한까지 여유",
+        "unit": "%p",
+        "direction": "low",
+        "strict": true,
+        "warn": 5,
+        "alarm": 0,
+        "incident": "ess-soc-limit",
+        "check": "{eq} SOC {soc_percent}% > 충전 상한 {soc_upper_limit}%",
+        "warn_check": "{eq} SOC {soc_percent}% — 충전 상한 {soc_upper_limit}%에 근접",
+        "alert": "SOC {soc_percent}% (충전 상한 {soc_upper_limit}%, {level})",
+        "meaning": "충전율 {soc_percent}%가 충전 상한 {soc_upper_limit}%를 넘었거나 가깝습니다 → 과충전은 화재 위험",
+        "rule": "상한까지 5%p 미만 주의, 상한 초과 경보 (상한: 옥내 80%·옥외 90%, 2020 ESS 안전대책)"
+      },
+      {
+        "metric": "soc_lower_margin",
+        "label": "방전 하한까지 여유",
+        "unit": "%p",
+        "direction": "low",
+        "strict": true,
+        "warn": 5,
+        "alarm": 0,
+        "incident": "ess-soc-low",
+        "check": "{eq} SOC {soc_percent}% < 방전 하한 {soc_lower_limit}%",
+        "warn_check": "{eq} SOC {soc_percent}% — 방전 하한 {soc_lower_limit}%에 근접",
+        "alert": "SOC {soc_percent}% (방전 하한 {soc_lower_limit}%, {level})",
+        "meaning": "충전율 {soc_percent}%로 방전 하한 {soc_lower_limit}% 근처입니다 → 피크 대응·비상 공급 여력 부족",
+        "rule": "하한까지 5%p 미만 주의, 하한 미만 경보 [가정]"
+      }
+    ],
+    "load": [],
+    "evc": [
+      {
+        "metric": "data_age_min",
+        "label": "데이터 경과",
+        "unit": "분",
+        "direction": "high",
+        "warn": 5,
+        "alarm": 15,
+        "incident": "comm-loss",
+        "check": "{eq} 데이터 {v}분 경과 ≥ 기준 {limit}분",
+        "alert": "데이터 {v}분 전 값 ({level} 기준 {limit}분 이상)",
+        "meaning": "충전기 데이터가 {v}분째 갱신되지 않습니다 → 충전기가 아니라 통신 경로(게이트웨이·배선) 문제일 수 있음",
+        "rule": "5분 이상 주의, 15분 이상 경보 [가정]"
+      }
+    ]
+  },
+
 
   "incident_types": {
     "_설명": "priority: 숫자가 작을수록 먼저(안전 > 데이터 신뢰 > 계통 > 비용 > 효율). safety: true면 질문이 다른 걸 물어도 함께 안내하는 안전 이슈. alert_keywords: 알람 문구에 이 단어가 있으면 해당 이상으로 본다.",
@@ -46,13 +245,15 @@
   },
 
   "rag": {
-    "_설명": "매뉴얼 검색(RAG). embedding_backend가 auto면 LLM_BACKEND를 따른다(fake→tfidf, ollama→ollama, openai→openai). 최종 점수 = 질문 의미 점수 + (전문 에이전트가 데이터로 확인한 이상이면 evidence_bonus). 단, 의미 점수가 evidence_min_score 이상인 매뉴얼에만 가산점을 준다(질문과 무관한 매뉴얼이 데이터 근거만으로 뽑히지 않게). 최종 점수가 min_score보다 낮으면 질문 의도가 불분명하다고 보고 알람 우선순위로 고른다. ollama·openai 값은 [가정] — 실제 측정 후 조정 필요. max_runbooks: 주 매뉴얼 + 안전 매뉴얼 최대 개수.",
+    "_설명": "매뉴얼 검색(RAG). embedding_backend가 auto면 LLM_BACKEND를 따른다(fake→tfidf, ollama→ollama, openai→openai). 최종 점수 = 질문 의미 점수 + (전문 에이전트가 데이터로 확인한 이상이면 evidence_bonus). 단, 의미 점수가 evidence_min_score 이상인 매뉴얼에만 가산점을 준다(질문과 무관한 매뉴얼이 데이터 근거만으로 뽑히지 않게). 최종 점수가 min_score보다 낮으면 질문 의도가 불분명하다고 보고 알람 우선순위로 고른다. ollama·openai 값은 [가정] — 실제 측정 후 조정 필요. max_runbooks: 주 매뉴얼 + 안전 매뉴얼 최대 개수. [상황별 매뉴얼] 매뉴얼 선택 점수는 기본 부분으로 매기고, 상황 절의 키워드가 질문에 있으면 keyword_bonus를 더한다. 매뉴얼 안의 상황은 키워드 → 의미 점수가 기본 부분보다 situation_margin 이상 높을 때 → 아니면 기본 절차 순으로 고른다.",
     "embedding_backend": "auto",
     "ollama_model": "bge-m3",
     "openai_model": "text-embedding-3-small",
     "top_k": 9,
     "min_score": {"tfidf": 0.08, "ollama": 0.45, "openai": 0.3},
     "evidence_bonus": 0.15,
+    "situation_margin": {"tfidf": 0.05, "ollama": 0.05, "openai": 0.05},
+    "keyword_bonus": 0.1,
     "evidence_min_score": {"tfidf": 0.03, "ollama": 0.35, "openai": 0.2},
     "max_runbooks": 2
   },
@@ -71,7 +272,7 @@
     "marker": "(운영자 승인 필요)",
     "action_phrases": ["충전을 중지", "충방전을 중지", "방전을 중지", "충방전 중지", "충전 중지", "방전 중지",
                        "부하 차단", "부하를 차단", "출력 제한", "출력을 제한", "제한값", "재기동", "계통에서 분리",
-                       "방전 계획", "충전 계획", "감축 계획", "출력 조정", "전압 억제"]
+                       "방전 계획", "충전 계획", "감축 계획", "출력 조정", "전압 억제", "충전 중단", "방전 중단", "충방전 중단", "충전을 중단", "방전을 중단", "충전으로 전환", "방전으로 전환", "충전 상태로 전환", "전력 조정", "출력을 낮", "출력을 줄", "부하를 대신", "비상 정지"]
   },
 
   "validation": {
@@ -79,7 +280,26 @@
     "min_length": 30,
     "required_marker": "1)",
     "max_attempts": 3,
-    "check_numbers": true
+    "check_numbers": true,
+    "llm_judge": true
+  },
+
+  "retry": {
+    "_설명": "[개선 I-1] MCP 조회 재시도. 일시 오류(timeout)만 재시도하고 그 외 오류는 바로 실패로 확정한다. 대기 시간은 initial_delay_s에서 시작해 backoff 배수로 늘어난다(0.5 → 1.5초).",
+    "max_retries": 2,
+    "initial_delay_s": 0.5,
+    "backoff": 3
+  },
+
+  "concurrency": {
+    "_설명": "[개선 I-11] 동시 실행 상한. mcp_max_concurrent: MCP 서버 하나에 동시에 보내는 요청 수(1이면 Base처럼 한 번에 하나). llm_max_concurrent: 실모델(Ollama·OpenAI) 동시 호출 수 — 로컬 Ollama는 작게 두는 것이 안전하다.",
+    "mcp_max_concurrent": 4,
+    "llm_max_concurrent": 2
+  },
+
+  "related_equipment": {
+    "_설명": "[개선 I-5] 전문 에이전트가 이 이상을 데이터로 확인했는데 오른쪽 설비를 아직 조사하지 않았다면, 재계획 때 한 번 더 조사한다(재계획 상한 1회 안에서). 통신 두절이면 계측 게이트웨이를 함께 확인하는 식.",
+    "comm-loss": ["gw-01"]
   },
 
   "metric_labels": {
@@ -110,7 +330,7 @@
     "connected_devices": ["연결 설비", "대"],
     "total_devices": ["전체 설비", "대"],
     "last_data_min_ago": ["마지막 수신 경과", "분"],
-    "missing_rate_percent": ["결측률", "%"]
+    "missing_rate_percent": ["결측률", "%"], "string_count": ["스트링 수", "개"], "zero_current_strings": ["전류 0A 스트링", "개"]
   },
 
   "power_balance": {

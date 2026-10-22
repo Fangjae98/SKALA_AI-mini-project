@@ -2,6 +2,7 @@
 fastapi>=0.115
 uvicorn>=0.30
 langgraph>=1.0
+langgraph-checkpoint-sqlite>=3.0   # [개선 I-3] 승인 대기 상태를 SQLite에 저장 (aiosqlite 포함)
 langchain-core>=0.3
 langsmith>=0.4
 fastmcp>=3.0

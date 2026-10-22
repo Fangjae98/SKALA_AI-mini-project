@@ -73,7 +73,19 @@
   .approval-actions { display: flex; gap: 8px; }
   .approval-actions button { padding: 7px 16px; font-size: 13px; }
   .approval-actions button.reject { background: #4a4a68; }
-  .approval-done { color: #9a9ac0; }
+  .approval-done { color: #9a9ac0; margin-top: 6px; }
+  .approval-hint { color: #b9b0e0; font-size: 12px; margin-bottom: 6px; }
+  .pick { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
+  .pick input[type=checkbox] { flex: 0 0 auto; margin-top: 8px; }
+  .approval-box textarea {
+    width: 100%; background: #1e1e2e; color: #e2e2f0; border: 1px solid #4a4068; border-radius: 8px;
+    padding: 6px 8px; font-size: 13px; font-family: inherit; resize: vertical;
+  }
+  .approval-box textarea.off { opacity: 0.45; text-decoration: line-through; }
+  .approval-box textarea.edited { border-color: #f2cc60; }
+  .approval-box textarea.judgement { margin: 4px 0 8px; }
+  .approval-box li.off { opacity: 0.5; text-decoration: line-through; }
+  .approval-actions button.revise { background: #8a6d1e; }
   form { display: flex; gap: 8px; padding: 14px 20px; background: #262638; border-top: 1px solid #3a3a52; }
   input {
     flex: 1; padding: 11px 14px; border-radius: 10px; border: 1px solid #3a3a52;
@@ -85,11 +97,71 @@
     color: white; font-size: 14px; cursor: pointer;
   }
   button:disabled { background: #3a3a52; cursor: default; }
+
+  /* ── 설비 현황 패널 (왼쪽) ── */
+  .layout { flex: 1; min-height: 0; display: flex; }
+  .chat { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .panel {
+    width: 320px; flex-shrink: 0; background: #22222f; border-right: 1px solid #3a3a52;
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .panel-head { padding: 12px 14px; border-bottom: 1px solid #3a3a52; }
+  .panel-title { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 14px; }
+  .panel-title button { padding: 4px 10px; font-size: 12px; background: #3a3a52; }
+  .panel-sum { margin-top: 6px; font-size: 12px; color: #9a9ac0; display: flex; gap: 10px; flex-wrap: wrap; }
+  .panel-list { flex: 1; overflow-y: auto; padding: 8px 10px 14px; }
+  .stage { font-size: 11px; color: #8b8bd8; margin: 10px 4px 4px; letter-spacing: 0.5px; }
+  .eq { background: #2a2a3c; border: 1px solid #34344a; border-radius: 10px; padding: 9px 10px; margin-bottom: 6px; }
+  .eq-top { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .eq-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .eq-id { color: #8a8aa8; font-size: 11px; }
+  .badge { font-size: 11px; padding: 2px 7px; border-radius: 8px; white-space: nowrap; }
+  .badge.healthy { background: #1f3a2a; color: #7ee787; }
+  .badge.warning { background: #3d3418; color: #f2cc60; }
+  .badge.degraded, .badge.down, .badge.error, .badge.unknown { background: #45202a; color: #ff9b9b; }
+  .panel-auto { font-size: 11px; color: #7a7a98; margin-top: 3px; }
+  .eq-alert { font-size: 12px; color: #c9c9e0; margin-top: 5px; line-height: 1.4; }
+  .eq-alert .more { color: #8a8aa8; }
+  .eq-actions { display: flex; gap: 6px; margin-top: 7px; }
+  .eq-actions button { padding: 4px 9px; font-size: 11px; border-radius: 7px; background: #3a3a52; }
+  .eq-actions button.act { background: #5b5bd6; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>분산에너지 운영 에이전트 <span>{{ backendLabel }}</span></header>
+  <div class="layout">
+  <aside class="panel">
+    <div class="panel-head">
+      <div class="panel-title">설비 현황 <button @click="loadEquipment" :disabled="eqLoading">{{ eqLoading ? '조회 중' : '새로고침' }}</button></div>
+      <div class="panel-sum">
+        <span v-for="(n, label) in eqSummary" :key="label" v-show="n">{{ label }} {{ n }}</span>
+        <span v-if="eqCheckedAt">· {{ eqCheckedAt }} 기준</span>
+      </div>
+      <div class="panel-auto">{{ REFRESH_SEC }}초마다 자동 새로고침 · 답변 후에도 갱신</div>
+    </div>
+    <div class="panel-list">
+      <div v-if="eqError" class="eq-alert">{{ eqError }}</div>
+      <template v-for="group in eqGroups" :key="group.stage">
+        <div class="stage">{{ group.stage }}</div>
+        <div v-for="d in group.items" :key="d.equipment_id" class="eq">
+          <div class="eq-top">
+            <span class="eq-name" :title="d.name">{{ d.name }}</span>
+            <span class="eq-id">{{ d.equipment_id }}</span>
+            <span class="badge" :class="d.status">{{ d.status_label }}</span>
+          </div>
+          <div v-if="d.alerts && d.alerts.length" class="eq-alert">
+            ⚠ {{ d.alerts[0] }}<span v-if="d.alerts.length > 1" class="more"> 외 {{ d.alerts.length - 1 }}건</span>
+          </div>
+          <div class="eq-actions">
+            <button @click="askStatus(d)" :disabled="sending">상태 보기</button>
+            <button v-if="d.suggested_question" class="act" @click="askAction(d)" :disabled="sending">대응 요청</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </aside>
+  <div class="chat">
   <div id="log" ref="logEl">
     <template v-for="item in log" :key="item.id">
       <div v-if="item.kind === 'user'" class="row user">
@@ -106,12 +178,27 @@
 
       <div v-else-if="item.kind === 'approval'" class="approval-box">
         <div class="approval-title">운영자 승인 필요 — 설비를 움직이는 조치 {{ item.actions.length }}건</div>
-        <ol><li v-for="(a, i) in item.actions" :key="i">{{ a }}</li></ol>
-        <div v-if="!item.decided" class="approval-actions">
-          <button @click="decide(item, 'approve')">승인</button>
-          <button class="reject" @click="decide(item, 'reject')">거부</button>
-        </div>
-        <div v-else class="approval-done">{{ item.decided === 'approve' ? '✓ 승인했습니다' : '✕ 거부했습니다' }}</div>
+        <template v-if="!item.decided">
+          <div class="approval-hint">시행할 조치만 체크하고, 필요하면 문구를 고쳐서 승인하세요.</div>
+          <div v-for="(a, i) in item.picks" :key="i" class="pick">
+            <input type="checkbox" v-model="a.checked" />
+            <textarea v-model="a.text" rows="2" :class="{ off: !a.checked, edited: a.text !== a.original }"></textarea>
+          </div>
+          <textarea v-model="item.comment" class="judgement" rows="2"
+                    placeholder="운영자 판단 (선택) — 예: 충전 중지 대신 출력을 50%로 제한하고 30분 뒤 다시 확인"></textarea>
+          <div class="approval-actions">
+            <button @click="decide(item, 'approve')" :disabled="!item.picks.some(p => p.checked)">
+              승인 ({{ item.picks.filter(p => p.checked).length }}건)</button>
+            <button class="revise" @click="decide(item, 'revise')" :disabled="!item.comment.trim()"
+                    title="운영자 판단을 반영해 보고서를 다시 작성하고 다시 승인을 받습니다">판단 반영해 다시 작성</button>
+            <button class="reject" @click="decide(item, 'reject')">거부</button>
+          </div>
+        </template>
+        <template v-else>
+          <ol><li v-for="(a, i) in item.picks" :key="i" :class="{ off: item.decided === 'approve' && !a.checked }">{{ a.text }}</li></ol>
+          <div class="approval-done">{{ ({ approve: '✓ 승인했습니다', reject: '✕ 거부했습니다', revise: '↻ 운영자 판단으로 문제를 다시 분석합니다' })[item.decided] }}
+            <span v-if="item.comment"> — 판단: {{ item.comment }}</span></div>
+        </template>
       </div>
       <details v-else-if="item.kind === 'prompt'" class="prompt-box">
         <summary>LLM에 전달된 최종 프롬프트 보기</summary>
@@ -121,34 +208,53 @@
   </div>
   <form @submit.prevent="onSubmit">
     <input
+      ref="inputEl"
       v-model="input"
       autocomplete="off"
       placeholder="예: 태양광 2호기 발전량이 평소보다 너무 낮아요, 원인 확인해주세요"
     />
     <button type="submit" :disabled="sending">보내기</button>
   </form>
+  </div>
+  </div>
 </div>
 
-<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/vue@3.5.13/dist/vue.global.prod.js"></script>
 <script>
-const { createApp, ref, reactive, nextTick } = Vue;
+const { createApp, ref, reactive, nextTick, computed, onMounted } = Vue;
+const REFRESH_SEC = 30;   // 설비 현황 자동 새로고침 주기(초)
 
 const STEP_LABELS = {
   PlanCreated: e => `계획 수립: 할 일 ${e.task_count}가지${e.targets?.length ? ` (설비: ${e.targets.join(', ')})` : ''}`,
   GateApplied: e => e.removed_analysis_tasks ? `불필요한 작업 ${e.removed_analysis_tasks}건 제거` : null,
   TaskCompleted: e => (e.source === 'monitoring'
       ? `설비 계측값 확인 (설비: ${e.target})`
-      : `대응 매뉴얼 조회 (이상 유형: ${e.target})`) + (e.retries ? ' (재시도 성공)' : ''),
+      : `대응 매뉴얼 조회 (이상 유형: ${e.target}${e.situation ? ` · 상황: ${e.situation}` : ''})`
+        + (e.unconfirmed ? ' — 데이터로 확인 안 됨 → 현장·센서 확인 절차' : '')) + (e.retries ? ' (재시도 성공)' : ''),
+  // [개선 I-1] 조회 실패 — 이 설비만 빼고 나머지로 계속 진행
+  TaskFailed: e => `⚠ ${e.source === 'runbook' ? '매뉴얼' : '설비'} 조회 실패 (${e.target}, ${e.code}) — 제외하고 계속 진행`,
   SpecialistReport: e => `${e.agent}: 점검 ${e.checks}건${e.suspected?.length ? ` · 의심 이상 ${e.suspected.join(', ')}` : ''}`,
   ReplanCheck: e => e.is_sufficient ? null
       : `매뉴얼 선택(${e.method === 'rag' ? 'RAG 의미 검색' : e.method === 'priority' ? '우선순위 규칙' : e.method || '키워드'}): ${e.target}`
-        + (e.extra?.length ? ` + 안전 이슈 ${e.extra.join(', ')}` : ''),
+        + (e.situation ? ` (상황: ${e.situation})` : '')
+        + (e.data_confirmed === false ? ' · 데이터 미확인' : '')
+        + (e.extra?.length ? ` + 안전 이슈 ${e.extra.join(', ')}` : '')
+        + (e.extra_targets?.length ? ` · 연관 설비 추가 조사 ${e.extra_targets.join(', ')}` : ''),
   DraftWritten: e => `답변 초안 작성 (시도 ${e.attempt})`,
-  Validation: e => e.verdict === '합격' ? '검수 통과'
+  Validation: e => e.verdict === '합격' ? `검수 통과${e.judge ? ' (코드 검사 + 심판)' : ''}`
       : e.verdict.startsWith('합격') ? '검수 최대 시도 도달 → 통과 처리'
-      : `검수 반려 → 다시 작성${e.uncited?.length ? ` (근거 없는 수치: ${e.uncited.join(', ')})` : ''}`,
-  ApprovalResolved: e => e.approved ? `운영자 승인 완료 (제어 조치 ${e.actions}건)` : `운영자 거부 (제어 조치 ${e.actions}건 미시행)`,
-  Finalize: () => '최종 답변 완성',
+      : `검수 반려 → 다시 작성${e.uncited?.length ? ` (근거 없는 수치: ${e.uncited.join(', ')})` : ''}`
+        + (e.judge && !e.judge.is_acceptable ? ` (심판: ${e.judge.reasoning})` : ''),
+  ApprovalResolved: e => e.approved
+      ? `운영자 승인 완료 (제어 조치 ${e.actions}건${e.edited ? `, 문구 수정 ${e.edited}건` : ''}${e.excluded ? `, 제외 ${e.excluded}건` : ''})`
+      : `운영자 거부 (제어 조치 ${e.actions}건 미시행)`,
+  ApprovalRevise: e => `운영자 판단 접수: "${e.comment}"`,
+  Reanalysis: e => `문제 재분석 ${e.round}회차 — 최신 계측값 다시 조회(${e.targets.join(', ')}) → 판단 반영해 매뉴얼 다시 선택 → 새 해결책 작성`,
+  RouteDecided: e => ({ chat: '질문 분류: 잡담·안내', equipment: '질문 분류: 설비 조회', incident: '질문 분류: 이상 대응(매뉴얼 조회)' })[e.route] || null,
+  EquipmentQueried: e => `설비 계측값 조회 ${e.targets.length}대` + (e.failed?.length ? ` (조회 실패: ${e.failed.join(', ')})` : ''),
+  StatusJudged: e => `상태 판단: ${e.name || e.target} — 기준 ${e.checked}개 항목 중 ${e.abnormal}개 벗어남 → ${({healthy: '정상', warning: '주의', degraded: '이상'})[e.status] || e.status}`,
+  ProblemAnalyzed: e => e.suspected.length ? `문제점 분석: ${e.target} — 의심 이상 ${e.suspected.join(', ')}` : `문제점 분석: ${e.target} — 기준을 벗어난 항목 없음`,
+  Finalize: e => e.partial ? '최종 답변 완성 (일부 데이터 없이 — 부분 보고)' : '최종 답변 완성',
 };
 
 createApp({
@@ -158,7 +264,53 @@ createApp({
     const input = ref('');
     const sending = ref(false);
     const logEl = ref(null);
-    const thread = 't-web-' + Math.random().toString(36).slice(2, 8);
+    const inputEl = ref(null);
+
+    // ── 설비 현황 패널 — GET /equipment (MCP로 지금 값을 읽음). 답변이 끝날 때마다, 그리고 30초마다 갱신
+    const equipment = ref([]);
+    const eqSummary = ref({});
+    const eqCheckedAt = ref('');
+    const eqLoading = ref(false);
+    const eqError = ref('');
+    const eqGroups = computed(() => {
+      const groups = [];
+      for (const d of equipment.value) {
+        let g = groups.find(x => x.stage === d.stage);
+        if (!g) { g = { stage: d.stage, items: [] }; groups.push(g); }
+        g.items.push(d);
+      }
+      return groups;
+    });
+    async function loadEquipment() {
+      eqLoading.value = true;
+      try {
+        const r = await fetch('/equipment');
+        if (r.status === 404) {   // 화면 서버만 새로 켜고 에이전트 서버(8100)는 옛 버전일 때
+          throw new Error('에이전트 서버(8100)가 옛 버전입니다. 에이전트 서버를 재시작해 주세요');
+        }
+        if (!r.ok) throw new Error(`서버 응답 ${r.status}`);
+        const data = await r.json();
+        equipment.value = data.items || [];
+        eqSummary.value = data.summary || {};
+        eqCheckedAt.value = data.checked_at || '';
+        eqError.value = '';
+      } catch (err) {
+        eqError.value = `설비 현황을 불러오지 못했습니다: ${err}`;
+      } finally {
+        eqLoading.value = false;
+      }
+    }
+    // 설비 데이터는 서버가 조회할 때마다 파일을 새로 읽는다 → 화면은 주기적으로 다시 요청만 하면 된다
+    onMounted(() => { loadEquipment(); setInterval(loadEquipment, REFRESH_SEC * 1000); });
+    function askStatus(d) {              // 상태 보기 → 바로 질문 (설비 조회)
+      input.value = `${d.name}(${d.equipment_id}) 상태 알려줘`;
+      onSubmit();
+    }
+    function askAction(d) {              // 대응 요청 → 진단 결과로 만든 질문을 입력창에 채워 두고, 운영자가 고쳐서 보낼 수 있게
+      input.value = d.suggested_question;
+      nextTick(() => inputEl.value && inputEl.value.focus());
+    }
+    let thread = 't-web-' + Math.random().toString(36).slice(2, 8);
     let nextId = 0;
 
     fetch('/health').then(r => r.json()).then(h => {
@@ -170,18 +322,25 @@ createApp({
       if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight;
     }
 
-    // SSE 하나를 열어 이벤트를 화면에 그린다. 처음 질문과 승인 후 재개(resume)에 같이 쓴다.
-    function runStream(url, stepsItem, approvalItem) {
-      const es = new EventSource(url);
+    // [개선 I-7 — 강의 5장 Custom Transport] EventSource(GET 전용) 대신 fetch(POST)로 SSE를 받아 직접 파싱한다.
+    // 질문이 URL에 남지 않는다. 청크 하나에 이벤트가 여러 개 섞이거나 중간에 잘려 와도 안전하게:
+    //   buffer에 누적 → "\n\n" 경계로 분리 → 마지막 미완성 조각은 buffer로 되돌림 → data: 줄만 JSON.parse
+    async function runStream(path, body, stepsItem, approvalItem) {
       let streamItem = null;
       let streamAttempt = null;   // write_node 재작성(attempt 증가) 시 새 말풍선으로 끊는다
 
-      es.onmessage = (event) => {
-        if (event.data === '[DONE]') { es.close(); sending.value = false; return; }
-        let e;
-        try { e = JSON.parse(event.data); } catch { return; }
+      const handle = (e) => {
+        if (e.type === 'Session') { thread = e.thread_id; return; }
+        if (e.type === 'Error') {
+          log.value.push({ id: nextId++, kind: 'agent', text: e.message });
+          scrollToBottom();
+          return;
+        }
 
         if (e.type === 'AnswerToken') {
+          // 보고서 초안(attempt 있음)은 검수 전이라 화면에 내보내지 않는다 — 반려된 초안이 보이면 운영자가 오해함.
+          // 검수를 통과한 답은 ApprovalRequired(draft) 또는 FinalAnswer로 한 번에 받는다. 잡담 답변은 그대로 흘려 보여 줌.
+          if (e.attempt != null) return;
           if (!streamItem || streamAttempt !== e.attempt) {
             streamItem = reactive({ id: nextId++, kind: 'agent', text: '' });
             log.value.push(streamItem);
@@ -193,8 +352,10 @@ createApp({
         }
 
         if (e.type === 'ApprovalRequired') {   // [After] 승인 대기 — 버튼을 보여주고 스트림은 여기서 끝남
+          if (e.draft) log.value.push({ id: nextId++, kind: 'agent', text: e.draft });   // 검수 통과한 보고서
           log.value.push(reactive({ id: nextId++, kind: 'approval', actions: e.actions,
-                                    draft: e.draft || '', decided: null, stepsItem }));
+                                    picks: e.actions.map(a => ({ original: a, text: a, checked: true })),
+                                    comment: '', draft: e.draft || '', decided: null, stepsItem }));
           scrollToBottom();
           return;
         }
@@ -225,7 +386,37 @@ createApp({
         scrollToBottom();
       };
 
-      es.onerror = () => { es.close(); sending.value = false; };
+      try {
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          const chunks = buffer.split('\n\n');
+          buffer = chunks.pop() ?? '';            // 아직 덜 온 마지막 조각은 다음 청크와 합친다
+          for (const raw of chunks) {
+            const dataLine = raw.split('\n').find(l => l.startsWith('data:'));
+            if (!dataLine) continue;
+            const data = dataLine.slice('data:'.length).trim();
+            if (data === '[DONE]') continue;
+            let e;
+            try { e = JSON.parse(data); } catch { continue; }
+            handle(e);
+          }
+        }
+      } catch (err) {
+        log.value.push({ id: nextId++, kind: 'agent', text: `연결 오류: ${err}` });
+      } finally {
+        sending.value = false;
+        scrollToBottom();
+        loadEquipment();   // 답변·승인 후 설비 상태를 다시 읽는다
+      }
     }
 
     function onSubmit() {
@@ -241,18 +432,19 @@ createApp({
       log.value.push(stepsItem);
       scrollToBottom();
 
-      runStream(`/chat/stream?message=${encodeURIComponent(text)}&thread_id=${encodeURIComponent(thread)}`,
-                stepsItem, null);
+      runStream('/chat/stream', { message: text, thread_id: thread }, stepsItem, null);
     }
 
-    function decide(item, decision) {   // [After] 승인/거부 버튼
+    function decide(item, decision) {   // 승인(골라서·고쳐서) / 판단 반영해 다시 작성 / 거부
       item.decided = decision;
       sending.value = true;
-      runStream(`/chat/resume/stream?thread_id=${encodeURIComponent(thread)}&decision=${decision}`,
+      runStream('/chat/resume/stream',
+                { thread_id: thread, decision, comment: item.comment, actions: item.picks },
                 item.stepsItem, item);
     }
 
-    return { backendLabel, log, input, sending, logEl, onSubmit, decide };
+    return { REFRESH_SEC, backendLabel, log, input, sending, logEl, inputEl, onSubmit, decide,
+             eqGroups, eqSummary, eqCheckedAt, eqLoading, eqError, loadEquipment, askStatus, askAction };
   },
 }).mount('#app');
 </script>

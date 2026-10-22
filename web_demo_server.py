@@ -9,6 +9,10 @@ web_chat.html이 바닐라 JS 대신 Vue 3(CDN 글로벌 빌드, 별도 빌드 �
 브라우저의 CORS 제약 없이 실제 에이전트와 대화할 수 있게 해주는 아주 얇은 레이어다.
 server.py는 평소처럼(fake/ollama/openai 아무 백엔드로나) 8100에 미리 띄워 놓아야 한다.
 
+[개선 I-7] 화면은 POST /chat/stream·/chat/resume/stream(본문 JSON)을 쓰고, 이 중계 서버도 POST를 그대로 넘긴다.
+스트리밍 응답에는 Cache-Control: no-cache, X-Accel-Buffering: no를 붙여 앞단 프록시(nginx 등)가 토큰을 모아서
+한 번에 보내지 않게 한다(프록시 쪽 proxy_buffering off 설정도 함께 필요 — 강의 5장 주의점).
+
 실행:
     python3 web_demo_server.py        # http://localhost:8600 에서 채팅 화면 오픈
 """
@@ -20,6 +24,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 BACKEND = "http://127.0.0.1:8100"
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 HERE = Path(__file__).parent
 
 app = FastAPI()
@@ -37,6 +42,13 @@ async def proxy_health():
     return JSONResponse(r.json(), status_code=r.status_code)
 
 
+@app.get("/equipment")
+async def proxy_equipment():
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.get(f"{BACKEND}/equipment")
+    return JSONResponse(r.json(), status_code=r.status_code)
+
+
 @app.post("/chat")
 async def proxy_chat(req: Request):
     body = await req.body()
@@ -46,18 +58,26 @@ async def proxy_chat(req: Request):
     return JSONResponse(r.json(), status_code=r.status_code)
 
 
-@app.get("/chat/stream")
-async def proxy_stream(message: str, thread_id: str = "web-demo"):
+def _relay(method: str, path: str, **kwargs) -> StreamingResponse:
     async def relay():
         async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream(
-                "GET", f"{BACKEND}/chat/stream",
-                params={"message": message, "thread_id": thread_id},
-            ) as upstream:
+            async with client.stream(method, f"{BACKEND}{path}", **kwargs) as upstream:
                 async for chunk in upstream.aiter_bytes():
                     yield chunk
 
-    return StreamingResponse(relay(), media_type="text/event-stream")
+    return StreamingResponse(relay(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@app.post("/chat/stream")
+async def proxy_stream_post(req: Request):
+    return _relay("POST", "/chat/stream", content=await req.body(),
+                  headers={"content-type": "application/json"})
+
+
+@app.get("/chat/stream")
+async def proxy_stream(message: str, thread_id: str | None = None):
+    params = {"message": message, **({"thread_id": thread_id} if thread_id else {})}
+    return _relay("GET", "/chat/stream", params=params)
 
 
 # [After 추가 — HITL] 승인/거부 결과를 백엔드로 중계
@@ -70,18 +90,16 @@ async def proxy_resume(req: Request):
     return JSONResponse(r.json(), status_code=r.status_code)
 
 
+@app.post("/chat/resume/stream")
+async def proxy_resume_stream_post(req: Request):
+    return _relay("POST", "/chat/resume/stream", content=await req.body(),
+                  headers={"content-type": "application/json"})
+
+
 @app.get("/chat/resume/stream")
 async def proxy_resume_stream(thread_id: str, decision: str = "approve", comment: str = ""):
-    async def relay():
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream(
-                "GET", f"{BACKEND}/chat/resume/stream",
-                params={"thread_id": thread_id, "decision": decision, "comment": comment},
-            ) as upstream:
-                async for chunk in upstream.aiter_bytes():
-                    yield chunk
-
-    return StreamingResponse(relay(), media_type="text/event-stream")
+    return _relay("GET", "/chat/resume/stream",
+                  params={"thread_id": thread_id, "decision": decision, "comment": comment})
 
 
 if __name__ == "__main__":

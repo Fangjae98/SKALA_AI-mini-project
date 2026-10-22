@@ -10,6 +10,15 @@ decoy) 두 서버다. resource/prompt를 요청할 때는 어느 서버가 그�
 알고 있지 않다고 가정하고, find_resource_template()/find_prompt()로 연결된 서버들을
 순서대로 조회(list)해 이름이 맞는 걸 찾은 뒤에야 그 서버로 read_resource/get_prompt를
 보낸다.
+
+[개선 I-11 — 강의 12장 동시 실행] Base는 MCP 호출 전부를 asyncio.Lock 하나로 감싸서, research 노드가
+asyncio.gather로 "병렬" 조회를 해도 MCP 구간에서는 한 번에 하나씩만 나갔다(측정된 병렬 효과는 sleep 구간뿐).
+MCP ClientSession은 요청마다 id를 붙여 응답을 짝지으므로 동시 요청을 처리할 수 있다. 그래서 전역 Lock 대신
+서버별 Semaphore로 "동시에 최대 N개"만 제한한다(N = config/rules.json의 concurrency.mcp_max_concurrent,
+1로 두면 Base와 같은 순차 동작). 무제한으로 열지 않는 이유: 강의의 주의점 — 무제한 동시 실행은 외부 시스템을
+과부하시킨다.
+[개선 I-1] 도구가 오류를 돌려주면(is_error) 응답 본문을 JSON으로 파싱하다 엉뚱한 예외가 나지 않도록
+McpToolError로 바로 알린다 → with_retry가 TOOL_EXECUTION_ERROR로 표준화한다.
 """
 import asyncio
 import json
@@ -21,6 +30,8 @@ from pathlib import Path
 from langsmith import traceable
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+from .config import RULES
 
 SERVER_DIR = Path(__file__).parent.parent
 DEFAULT_SERVER_SCRIPTS = {
@@ -41,13 +52,17 @@ def _attr(obj, *names):
     raise AttributeError(f"{type(obj).__name__!r} has none of {names!r}")
 
 
+class McpToolError(RuntimeError):
+    """MCP 서버가 도구 실행 오류(is_error=True)를 돌려줬을 때."""
+
+
 class MCPClient:
     def __init__(self, flaky_first_tool_call: bool = True,
                  server_scripts: dict[str, Path] | None = None):
         self._server_scripts = server_scripts or DEFAULT_SERVER_SCRIPTS
         self._stack: AsyncExitStack | None = None
         self.sessions: dict[str, ClientSession] = {}
-        self._lock = asyncio.Lock()
+        self._limits: dict[str, asyncio.Semaphore] = {}   # [개선 I-11] 서버별 동시 요청 상한
         self._flaky_pending = flaky_first_tool_call   # Wave 9 시뮬레이션
 
     async def start(self) -> None:
@@ -60,6 +75,7 @@ class MCPClient:
             session = await self._stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
             self.sessions[server_name] = session
+            self._limits[server_name] = asyncio.Semaphore(RULES["concurrency"]["mcp_max_concurrent"])
 
     async def stop(self) -> None:
         if self._stack is not None:
@@ -72,13 +88,16 @@ class MCPClient:
         if self._flaky_pending and name == "get_equipment_status":
             self._flaky_pending = False
             raise asyncio.TimeoutError("simulated transient timeout (Wave 9 demo)")
-        async with self._lock:
+        async with self._limits[server]:
             result = await self.sessions[server].call_tool(name, arguments)
-        return json.loads(result.content[0].text)
+        text = result.content[0].text if result.content else ""
+        if _attr(result, "isError", "is_error"):
+            raise McpToolError(text or f"{name} 실행 오류")
+        return json.loads(text)
 
     @traceable(run_type="tool", name="mcp.list_resource_templates")
     async def list_resource_templates(self, server: str) -> list:
-        async with self._lock:
+        async with self._limits[server]:
             result = await self.sessions[server].list_resource_templates()
         return _attr(result, "resourceTemplates", "resource_templates")
 
@@ -95,13 +114,13 @@ class MCPClient:
 
     @traceable(run_type="tool", name="mcp.read_resource")
     async def read_resource(self, uri: str, server: str) -> str:
-        async with self._lock:
+        async with self._limits[server]:
             result = await self.sessions[server].read_resource(uri)
         return result.contents[0].text
 
     @traceable(run_type="tool", name="mcp.list_prompts")
     async def list_prompts(self, server: str) -> list:
-        async with self._lock:
+        async with self._limits[server]:
             result = await self.sessions[server].list_prompts()
         return result.prompts
 
@@ -117,6 +136,6 @@ class MCPClient:
 
     @traceable(run_type="tool", name="mcp.get_prompt")
     async def get_prompt(self, name: str, arguments: dict, server: str = "ops") -> str:
-        async with self._lock:
+        async with self._limits[server]:
             result = await self.sessions[server].get_prompt(name, arguments)
         return result.messages[0].content.text

@@ -17,6 +17,10 @@ OpenAI 계정에 실제 비용이 청구된다(run_openai.sh 실행 전 반드�
 `usd_per_1k_tokens` 하나로 통일해두기 위해 여기서도 단일 블렌디드 단가로 단순화한다.)
 
 사전 조건: 유효한 `OPENAI_API_KEY` 환경변수(.env).
+
+[개선 I-2] 동기 httpx.post → httpx.AsyncClient + await (이벤트 루프를 막지 않음, ollama_llm.py와 같은 이유).
+[개선 I-11] 동시 호출 수는 agent/limits.py의 llm_slot()으로 제한.
+[개선 I-4] judge(): 작성 모델(gpt-4o)과 별개인 fast 모델(gpt-4o-mini)이 보고서를 4개 기준으로 검수.
 """
 import json
 import os
@@ -26,9 +30,10 @@ import httpx
 from langsmith import traceable
 
 from .equipment import DEFAULT_EQUIPMENT, KNOWN_SYSTEMS as EQUIPMENT_IDS, find_mentions
-from .fake_llm import INCIDENT_PATTERN
-from .prompts import (ANALYZE_SYSTEM, CHAT_SYSTEM, ROUTE_SYSTEM, WRITE_SYSTEM,
-                      analyze_facts, plan_system, write_facts)
+from .fake_llm import INCIDENT_PATTERN, parse_judgement
+from .limits import llm_slot
+from .prompts import (ANALYZE_SYSTEM, CHAT_SYSTEM, JUDGE_SYSTEM, ROUTE_SYSTEM, WRITE_SYSTEM,
+                      analyze_facts, judge_user, operator_rule, plan_system, write_facts)
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -54,7 +59,7 @@ def _guess_targets(query: str) -> list[str]:
 
 ROUTE_INSTRUCTIONS = (
     'JSON 객체로만 응답하라. 스키마: '
-    '{"route": "chat" 또는 "incident", "needs_analysis": true 또는 false}'
+    '{"route": "chat" 또는 "equipment" 또는 "incident", "needs_analysis": true 또는 false}'
 )
 
 PLAN_INSTRUCTIONS = (
@@ -64,19 +69,25 @@ PLAN_INSTRUCTIONS = (
 
 
 class OpenAILLM:
-    def __init__(self, model: str, usd_per_1k_tokens: float):
+    def __init__(self, model: str, usd_per_1k_tokens: float, judge_model: str | None = None,
+                 judge_usd_per_1k: float | None = None):
         self.name = f"openai:{model}"
         self.model = model
         self.usd_per_1k = usd_per_1k_tokens
         self.api_key = os.environ.get("OPENAI_API_KEY", "")
+        # [개선 I-4 보정] 심판 모델을 따로 정할 수 있다. OpenAI 실측에서 gpt-4o-mini 심판이 안전 이슈가 없는 질문도
+        # 3회 연속 반려(자기모순적 이유)해 재작성 비용이 커졌고, gpt-4o 심판은 같은 질문을 1회에 통과시켰다.
+        self.judge_model = judge_model or model
+        self.judge_usd_per_1k = judge_usd_per_1k if judge_usd_per_1k is not None else usd_per_1k_tokens
 
-    def _chat(self, system: str, user: str, json_mode: bool = False) -> tuple[str, dict]:
+    async def _chat(self, system: str, user: str, json_mode: bool = False,
+                    model: str | None = None, usd_per_1k: float | None = None) -> tuple[str, dict]:
         if not self.api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY가 설정되지 않았습니다 — .env 또는 환경변수로 지정하세요."
             )
         payload = {
-            "model": self.model,
+            "model": model or self.model,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}],
             "temperature": 0,
@@ -85,13 +96,15 @@ class OpenAILLM:
             payload["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {self.api_key}",
                    "Content-Type": "application/json"}
-        resp = httpx.post(OPENAI_URL, json=payload, headers=headers, timeout=120.0)
+        async with llm_slot(), httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(OPENAI_URL, json=payload, headers=headers)
         resp.raise_for_status()
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
         tokens = data.get("usage", {}).get("total_tokens", 0)
-        usage = {"model": self.name, "tokens": tokens,
-                 "usd": round(tokens / 1000 * self.usd_per_1k, 6)}
+        price = self.usd_per_1k if usd_per_1k is None else usd_per_1k
+        usage = {"model": f"openai:{model or self.model}", "tokens": tokens,
+                 "usd": round(tokens / 1000 * price, 6)}
         return content, usage
 
 
@@ -99,12 +112,12 @@ class OpenAIFastLLM(OpenAILLM):
     """[분산에너지] 분류·계획·단순 대화 전담 (저비용 모델, 기본 gpt-4o-mini)."""
 
     @traceable(run_type="llm", name="openai_fast.route")
-    def route(self, query: str) -> tuple[dict, dict]:
+    async def route(self, query: str) -> tuple[dict, dict]:
         system = ROUTE_SYSTEM + " " + ROUTE_INSTRUCTIONS   # [After] prompts.py로 이동
-        content, usage = self._chat(system, query, json_mode=True)
+        content, usage = await self._chat(system, query, json_mode=True)
         try:
             raw = json.loads(content)
-            route = raw.get("route") if raw.get("route") in ("chat", "incident") else None
+            route = raw.get("route") if raw.get("route") in ("chat", "equipment", "incident") else None
             result = {"route": route or "chat",
                       "needs_analysis": bool(raw.get("needs_analysis", False))}
         except (json.JSONDecodeError, AttributeError):
@@ -116,10 +129,10 @@ class OpenAIFastLLM(OpenAILLM):
         return result, usage
 
     @traceable(run_type="llm", name="openai_fast.plan")
-    def plan(self, query: str, procedure_prompt: str) -> tuple[dict, dict]:
+    async def plan(self, query: str, procedure_prompt: str) -> tuple[dict, dict]:
         system = plan_system(sorted(KNOWN_SYSTEMS)) + " " + PLAN_INSTRUCTIONS   # [After] prompts.py로 이동
         user = f"## 표준 절차\n{procedure_prompt}\n\n## 사용자 요청\n{query}"
-        content, usage = self._chat(system, user, json_mode=True)
+        content, usage = await self._chat(system, user, json_mode=True)
 
         # 코드 레벨 정규화 — JSON 형식은 지켜져도 내용은 흔들릴 수 있으므로
         # (대상 시스템 오타, task 누락/중복) 실행 가능한 형태로 보정한다.
@@ -158,10 +171,16 @@ class OpenAIFastLLM(OpenAILLM):
         return result, usage
 
     @traceable(run_type="llm", name="openai_fast.analyze")
-    def analyze(self, collected: list[dict]) -> tuple[str, dict]:
+    async def analyze(self, collected: list[dict]) -> tuple[str, dict]:
         system = ANALYZE_SYSTEM   # [After] prompts.py로 이동
         facts = analyze_facts(collected)
-        return self._chat(system, facts)
+        return await self._chat(system, facts)
+
+    @traceable(run_type="llm", name="openai_fast.judge")
+    async def judge(self, query: str, collected: list[dict], draft: str) -> tuple[dict, dict]:
+        content, usage = await self._chat(JUDGE_SYSTEM, judge_user(query, collected, draft), json_mode=True,
+                                          model=self.judge_model, usd_per_1k=self.judge_usd_per_1k)
+        return parse_judgement(content), usage
 
     @traceable(run_type="llm", name="openai_fast.chat")
     async def chat(self, query: str, history: list[dict], on_token=None) -> tuple[str, dict]:
@@ -172,7 +191,7 @@ class OpenAIFastLLM(OpenAILLM):
         rendered = "\n".join(f"{m['role']}: {m['content']}" for m in history[-10:])
         user = (f"## 지금까지의 대화\n{rendered or '(없음)'}\n\n"
                 f"## 사용자의 새 메시지\n{query}")
-        content, usage = self._chat(system, user)
+        content, usage = await self._chat(system, user)
         usage["prompt"] = f"[SYSTEM]\n{system}\n\n[USER]\n{user}"
         if on_token is not None:
             on_token(content)
@@ -189,10 +208,10 @@ class OpenAIQualityLLM(OpenAILLM):
         아직 stream=True로 호출하지 않아 토큰 단위 중계는 하지 않고 완성된 응답을 한 번에
         전달한다."""
         system = WRITE_SYSTEM   # [After] prompts.py로 이동
-        user = f"## 사용자 요청\n{query}\n\n## 수집된 사실\n" + write_facts(collected)
+        user = f"## 사용자 요청\n{query}\n\n## 수집된 사실\n" + write_facts(collected) + operator_rule(collected)
         if feedback:
             user += f"\n\n## 이전 초안에 대한 검증 반려 사유 (반드시 반영)\n{feedback}"
-        content, usage = self._chat(system, user)
+        content, usage = await self._chat(system, user)
         usage["prompt"] = f"[SYSTEM]\n{system}\n\n[USER]\n{user}"
         if on_token is not None:
             on_token(content)

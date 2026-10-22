@@ -1,0 +1,36 @@
+{
+  "label": "개선전",
+  "root": "/private/tmp/claude-501/-Users-fangjae/5cd6ec54-5521-43a7-9426-38eba3b32f4c/scratchpad/der_before",
+  "results": {
+    "S1_장애주입": {
+      "answered": false,
+      "error": "ConnectionError: evc-01 계측 서버 응답 없음",
+      "failure_stated": false
+    },
+    "S2_재시작후_승인": {
+      "interrupted": true,
+      "resumed_after_restart": false,
+      "error": "KeyError"
+    },
+    "S3_품질저하요청": {
+      "note": "해당 없음(심판 기능 없음)"
+    },
+    "S4_동시요청": {
+      "two_requests_total_s": 1.6,
+      "max_event_loop_stall_s": 1.05,
+      "note": "LLM 호출 1번 = 0.5초(가짜 Ollama). 질문 1개 = 라우팅 + 답변 = 호출 2번"
+    },
+    "S5_MCP_동시조회": {
+      "calls": 27,
+      "elapsed_s": 0.061,
+      "results_match": true
+    },
+    "S6_연관설비": {
+      "surveyed": [
+        "evc-01",
+        "load-01"
+      ],
+      "gateway_checked": false
+    }
+  }
+}

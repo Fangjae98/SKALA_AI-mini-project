@@ -26,3 +26,13 @@ def test_승인표시나_제어문구가_있는_문장만_찾는다():
 
 def test_제어_조치가_없으면_빈_목록():
     assert extract_control_actions("1) 상태 정상. 2) 기록만 남긴다.") == []
+
+
+def test_실모델이_표시를_다르게_써도_승인_대상으로_잡는다():
+    """Ollama 실측: '(운영자 승인 필요)' 대신 '~하되, 운영자 승인 필요.'처럼 씀 → 놓치면 승인 없이 실행될 위험."""
+    from agent.approval import extract_control_actions
+    draft = ("3) 권장 조치\n- ESS 2호기 방전 중단 및 ESS 1호기 충전 중단을 실행하되, 운영자 승인 필요.\n"
+             "- ESS 1호기 방전 전력 조정을 통해 부하를 대신 맡긴다.\n- 원인을 기록한다.\n"
+             "4) 운영자 판단 반영: ESS 2호기 방전 중지와 ESS 1호기 충전 중지를 반영했다.")
+    acts = extract_control_actions(draft)
+    assert len(acts) == 2 and all("운영자 판단 반영" not in a for a in acts)

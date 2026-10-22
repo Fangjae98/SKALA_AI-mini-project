@@ -6,11 +6,15 @@ Base에서는 서버 이름(auth-service 등)을 영어 ID로만 찾았다. 분�
 질문 속에서 ID나 별칭이 등장하는 위치로 설비를 찾는다.
 """
 import json
+import os
 from pathlib import Path
 
 from .config import RULES
 
-DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "monitoring.json"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+# 설비 데이터 파일. 기본은 화면 시연용 data/monitoring.json.
+# 테스트·회귀 평가는 정답이 고정된 시나리오(data/scenarios/full_incident.json)를 DER_MONITORING_FILE로 지정한다.
+DATA_PATH = ROOT_DIR / os.environ.get("DER_MONITORING_FILE", "data/monitoring.json")
 
 # [After 변경 — 모듈화] 아래 값들은 config/rules.json에서 읽는다(Before에서는 이 파일에 직접 적혀 있었음).
 DEFAULT_EQUIPMENT = RULES["equipment"]["default"]

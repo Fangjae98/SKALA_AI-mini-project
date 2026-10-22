@@ -1,0 +1,49 @@
+{
+  "label": "개선후",
+  "root": "/Users/fangjae/workspace/AI_pjt/der_ops_agent",
+  "results": {
+    "S1_장애주입": {
+      "answered": true,
+      "error": null,
+      "failure_stated": true,
+      "failures": 1
+    },
+    "S2_재시작후_승인": {
+      "interrupted": true,
+      "resumed_after_restart": true,
+      "error": null
+    },
+    "S3_품질저하요청": {
+      "심판 끔(코드 검사만)": {
+        "safety_titles_in_answer": 0,
+        "validation_attempts": 2,
+        "cost_usd": 0.000344,
+        "elapsed_s": 0.75
+      },
+      "심판 켬": {
+        "safety_titles_in_answer": 2,
+        "validation_attempts": 3,
+        "cost_usd": 0.001425,
+        "elapsed_s": 0.75
+      }
+    },
+    "S4_동시요청": {
+      "two_requests_total_s": 1.08,
+      "max_event_loop_stall_s": 0.04,
+      "note": "LLM 호출 1번 = 0.5초(가짜 Ollama). 질문 1개 = 라우팅 + 답변 = 호출 2번"
+    },
+    "S5_MCP_동시조회": {
+      "calls": 27,
+      "elapsed_s": 0.043,
+      "results_match": true
+    },
+    "S6_연관설비": {
+      "surveyed": [
+        "evc-01",
+        "load-01",
+        "gw-01"
+      ],
+      "gateway_checked": true
+    }
+  }
+}

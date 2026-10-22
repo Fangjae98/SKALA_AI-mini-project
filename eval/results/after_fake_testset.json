@@ -8,7 +8,7 @@
     "safety_coverage": "4/4",
     "unapproved_control_actions": 0,
     "uncited_numbers": 0,
-    "avg_elapsed_s": 0.73,
+    "avg_elapsed_s": 0.74,
     "total_cost_usd": 0.008233,
     "avg_mcp_calls": 5.2,
     "avg_validation_attempts": 1.8
@@ -39,7 +39,7 @@
       "validation_attempts": 2,
       "retry_count": 1,
       "cost_usd": 0.000847,
-      "elapsed_s": 1.29
+      "elapsed_s": 1.2
     },
     {
       "id": 2,
@@ -67,7 +67,7 @@
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.001002,
-      "elapsed_s": 0.76
+      "elapsed_s": 0.81
     },
     {
       "id": 3,
@@ -94,7 +94,7 @@
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000785,
-      "elapsed_s": 0.76
+      "elapsed_s": 0.78
     },
     {
       "id": 4,
@@ -121,7 +121,7 @@
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.00102,
-      "elapsed_s": 0.76
+      "elapsed_s": 0.77
     },
     {
       "id": 5,
@@ -149,7 +149,7 @@
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.001007,
-      "elapsed_s": 0.76
+      "elapsed_s": 0.75
     },
     {
       "id": 6,
@@ -231,7 +231,7 @@
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000955,
-      "elapsed_s": 0.76
+      "elapsed_s": 0.77
     },
     {
       "id": 9,
@@ -258,7 +258,7 @@
       "validation_attempts": 2,
       "retry_count": 0,
       "cost_usd": 0.000785,
-      "elapsed_s": 0.75
+      "elapsed_s": 0.76
     },
     {
       "id": 10,
@@ -280,7 +280,7 @@
       "validation_attempts": 0,
       "retry_count": 0,
       "cost_usd": 3e-06,
-      "elapsed_s": 0.0
+      "elapsed_s": 0.01
     }
   ]
 }

@@ -4,7 +4,7 @@ import json
 from agent.config import ROOT
 from agent.specialists import specialist_for, stage_checks
 
-DATA = json.loads((ROOT / "data" / "monitoring.json").read_text())
+DATA = json.loads((ROOT / "data" / "scenarios" / "full_incident.json").read_text())
 
 
 def status(eq_id):

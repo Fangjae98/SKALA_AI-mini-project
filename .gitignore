@@ -5,3 +5,7 @@ __pycache__/
 *.log
 eval/regression_session.db
 .pytest_cache/
+checkpoints.db
+checkpoints.db-*
+logs/
+.DS_Store

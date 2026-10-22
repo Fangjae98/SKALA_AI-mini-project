@@ -8,7 +8,7 @@
     "safety_coverage": "2/2",
     "unapproved_control_actions": 0,
     "uncited_numbers": 0,
-    "avg_elapsed_s": 0.34,
+    "avg_elapsed_s": 0.32,
     "total_cost_usd": 0.002121,
     "avg_mcp_calls": 2.17,
     "avg_validation_attempts": 0.67
@@ -34,7 +34,7 @@
       "validation_attempts": 0,
       "retry_count": 0,
       "cost_usd": 5e-06,
-      "elapsed_s": 0.01
+      "elapsed_s": 0.03
     },
     {
       "id": "H2",
@@ -85,7 +85,7 @@
       "validation_attempts": 2,
       "retry_count": 1,
       "cost_usd": 0.001292,
-      "elapsed_s": 1.25
+      "elapsed_s": 1.14
     },
     {
       "id": "H4",
@@ -107,7 +107,7 @@
       "validation_attempts": 0,
       "retry_count": 0,
       "cost_usd": 5e-06,
-      "elapsed_s": 0.0
+      "elapsed_s": 0.01
     },
     {
       "id": "H5",

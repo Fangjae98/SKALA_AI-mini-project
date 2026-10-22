@@ -20,6 +20,9 @@ LLM은 환경변수 LLM_BACKEND(fake 기본 / ollama / openai)를 따른다.
 - 근거 없는 수치    : 최종 답의 숫자 중 질문·수집 자료 어디에도 없는 것의 수
 - 지연(초)·비용·MCP 호출 수·검수 시도 수
 """
+import os as _os
+# 질문 세트의 정답은 '전체 이상' 시나리오 기준 — 화면 시연용 데이터와 분리
+_os.environ.setdefault("DER_MONITORING_FILE", "data/scenarios/full_incident.json")
 import argparse
 import asyncio
 import json
